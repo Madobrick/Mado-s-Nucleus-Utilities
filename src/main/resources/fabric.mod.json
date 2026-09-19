@@ -1,0 +1,31 @@
+{
+	"schemaVersion": 1,
+	"id": "nucleus",
+	"version": "${version}",
+	"name": "Mado's Nucleus Utilities",
+	"description": "Mado's Nucleus Utilities: Temple waypoints (through-wall highlights), Bal timer, jackpot celebrations, speedrun timer.",
+	"authors": [
+		"Nucleus"
+	],
+	"contact": {
+		"homepage": "https://hypixel.net/",
+		"sources": "https://hypixel.net/"
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/nucleus/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.nucleus.NucleusMod"
+		],
+		"client": [
+			"com.nucleus.client.NucleusClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.1",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

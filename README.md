@@ -3,16 +3,6 @@
 A client-side Hypixel SkyBlock mod for Nucleus runners. 
 -Temple waypoints, Bal timer, jackpot celebrations, a crystal-run speedrun timer, and achievements.
 
-## Trust first: is this safe?
-
-Yes — verify it yourself instead of trusting me:
-
-- **100% open source.** Every line of the mod is in this repository (`src/`). No obfuscation, no hidden modules.
-- **No internet access.** The mod makes zero network requests: no update checks, no analytics, no Discord RPC, no API calls. It only reads your game (chat, scoreboard, entities) and draws overlays.
-- **No account access.** It never touches your session, tokens, or credentials, and never reads or writes files outside its own tiny configs in `.minecraft/config/nucleus/`.
-- **Reproducible CI builds.** Every push is compiled from source by GitHub Actions (`.github/workflows/build.yml`) with the resulting jar attached as an artifact — download that instead of any random file and compare hashes.
-- **Small, readable codebase.** The whole mod is a handful of classes under `src/*/java/com/nucleus/` — start with `NucleusClient.java`.
-
 ## Features
 
 - **Temple waypoints** — hotkey captures 3 through-wall highlights at fixed offsets from the Jungle Temple to etherwarp to; custom waypoints (up to 100) anywhere in the Hollows.

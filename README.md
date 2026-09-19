@@ -1,7 +1,7 @@
 # Mado's Nucleus Utilities
 
-A client-side Hypixel SkyBlock mod for **Crystal Hollows** players (Fabric, Minecraft 26.1.2):
-Temple waypoints, Bal timer, jackpot celebrations, a crystal-run speedrun timer, and achievements.
+A client-side Hypixel SkyBlock mod for Nucleus runners. 
+-Temple waypoints, Bal timer, jackpot celebrations, a crystal-run speedrun timer, and achievements.
 
 ## Trust first: is this safe?
 
@@ -15,10 +15,10 @@ Yes — verify it yourself instead of trusting me:
 
 ## Features
 
-- **Temple waypoints** — hotkey captures 3 through-wall highlights at fixed offsets from the Jungle Temple; custom waypoints (up to 100) anywhere in the Hollows.
+- **Temple waypoints** — hotkey captures 3 through-wall highlights at fixed offsets from the Jungle Temple to etherwarp to; custom waypoints (up to 100) anywhere in the Hollows.
 - **Bal timer** — 60s respawn countdown triggered by the Bal kill message, movable HUD, Crystal Hollows only.
-- **Jackpot animation** — casino wheel + MAX WIN celebration for Divan's Alloy / Quick Claw / Jade Dye, detected the way SkyHanni does (nucleus bundle chat + rare-drop lines).
-- **Speedrun timer** — crystal-run timer with auto splits (box, Yolkar egg, crystals, Bal area, Topaz, first place, box return), bests + trimmed averages in `config/nucleus/speedrun.json`.
+- **Rare drop animation** — casino wheel + MAX WIN celebration for Divan's Alloy / Quick Claw / Jade Dye, detected the way SkyHanni does (nucleus bundle chat + rare-drop lines).
+- **Speedrun timer** — timer with auto splits (box, Yolkar egg, crystals, Bal area, Topaz, first place, box return), bests + trimmed averages in `config/nucleus/speedrun.json`.
 - **Achievements** — tiered (Nucleus Runner, Speedrunner, Pro Gambler) and hidden fun achievements, all earned locally.
 - Config GUI via `/madobrick` (works anywhere; features work in the Crystal Hollows).
 
@@ -50,4 +50,4 @@ certutil -hashfile build\libs\nucleus-0.1.0.jar SHA256
 
 ## License
 
-CC0-1.0 — do whatever you want with it. See [LICENSE](LICENSE).
+CC0-1.0 — See [LICENSE](LICENSE).

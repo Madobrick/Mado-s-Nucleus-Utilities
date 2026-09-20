@@ -1,7 +1,6 @@
 # Mado's Nucleus Utilities
 
-A client-side Hypixel SkyBlock mod for Nucleus runners. 
--Temple waypoints, Bal timer, jackpot celebrations, a crystal-run speedrun timer, and achievements.
+A client side Hypixel SkyBlock mod for Nucleus runners. 
 
 ## Features
 
@@ -16,28 +15,4 @@ A client-side Hypixel SkyBlock mod for Nucleus runners.
 
 - Minecraft **26.1.2**, Fabric Loader **0.19.5+**, Fabric API, Java **25**.
 
-## Build from source
-
-```sh
-./gradlew build
-```
-
-The jar lands in `build/libs/`. Compare its SHA-256 with the release artifact:
-
-```sh
-# Windows
-certutil -hashfile build\libs\nucleus-0.1.0.jar SHA256
-```
-
-## Commands
-
-- `/madobrick` — config GUI (all tabs)
-- `/madobrick set` / `/madobrick clear` — temple waypoints
-- `/madobrick alloy test` — preview the jackpot animation
-- `/madobrick hollows` — location diagnostics
-- `/madobrick setRuns|setBest|setSplit` — manual speedrun records
-- `/nucleus status` — diagnostics
-
-## License
-
-CC0-1.0 — See [LICENSE](LICENSE).
+Open config in game with /madobrick

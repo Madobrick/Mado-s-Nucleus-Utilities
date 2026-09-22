@@ -1,18 +1,14 @@
 # Mado's Nucleus Utilities
 
-A client side Hypixel SkyBlock mod for Nucleus runners. 
+A client side Hypixel SkyBlock mod for Nucleus runners with various features!
 
-## Features
-
-- **Temple waypoints** — hotkey captures 3 waypoints at fixed offsets from the Jungle Temple to etherwarp to; custom waypoints (up to 100) anywhere in the Hollows.
-- **Bal timer** — 60s respawn countdown triggered by the Bal kill message.
-- **Rare drop animation** — casino wheel + MAX WIN animation for Divan's Alloy / Quick Claw / Jade Dye.
-- **Speedrun timer** — timer with auto splits, personal bests + trimmed averages in `config/nucleus/speedrun.json`.
-- **Achievements** — tiered (Nucleus Runner, Speedrunner, Pro Gambler) and hidden fun achievements, all earned locally.
-- Config GUI via `/madobrick` (works anywhere; features work in the Crystal Hollows).
-
-## Requirements
-
-- Minecraft **26.1.2**, Fabric Loader **0.19.5+**, Fabric API, Java **25**.
-
-Open config in game with /madobrick
+- Preset waypoints for jungle etherwarp + cheese
+- Custom waypoints that reset per lobby that you can set with a click of a button!
+- Bal timer that tracks when bal is able to respawn again!
+- Speedrun timer with splits with tons and tons of customizibility features! Track your best runs!
+- Gambling animation for when you get a rare drop!
+- For fun achievements to keep you on the grind!
+- Tells you the lobby day!
+- Wrong pet/Low on tools alerts!
+- Tools/hr tracker
+- And more to come!

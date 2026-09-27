@@ -32,6 +32,10 @@ bin/
 
 run/
 
+# local working copies, not build inputs (build uses src/*/resources)
+# raw_assets/ (original art sources) IS committed for provenance.
+/assets/
+
 # java
 
 hs_err_*.log

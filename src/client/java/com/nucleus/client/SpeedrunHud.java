@@ -25,8 +25,14 @@ public final class SpeedrunHud implements HudElement {
 		if (!HollowsDetector.isInCrystalHollows()) {
 			return;
 		}
+		if (JackpotAnimation.cinematicActive()) {
+			return;
+		}
 		Minecraft client = Minecraft.getInstance();
 		if (client.level == null || client.player == null) {
+			return;
+		}
+		if (client.screen instanceof MoveHudScreen) {
 			return;
 		}
 		SpeedrunManager.State state = SpeedrunManager.state();
@@ -39,10 +45,11 @@ public final class SpeedrunHud implements HudElement {
 		int color2 = 0xFFAAAAAA;
 		if (state == SpeedrunManager.State.RUNNING) {
 			String head = SpeedrunManager.currentHead();
-			String headName = head == null ? "return" : NucleusMod.SPEEDRUN.displayName(head);
+			String headName = head == null ? "finishing..." : NucleusMod.SPEEDRUN.displayName(head);
 			int headColor = head == null ? 0xFFFFFFFF : withFullAlpha(SpeedrunStore.colorOf(head));
 			line1 = "Run " + SpeedrunStore.fmt(SpeedrunManager.liveMs())
-				+ " (" + SpeedrunManager.splitIdx() + "/" + SpeedrunManager.runOrder().size() + ")";
+				+ " (" + SpeedrunManager.splitIdx() + "/" + SpeedrunManager.runOrder().size() + ")"
+				+ (SpeedrunManager.afkPaused() ? " [AFK]" : "");
 			line2 = "-> " + headName;
 			color1 = 0xFFFFFFFF;
 			color2 = headColor;
@@ -59,21 +66,33 @@ public final class SpeedrunHud implements HudElement {
 
 		int x = NucleusMod.SPEEDRUN.speedTimerX;
 		int y = NucleusMod.SPEEDRUN.speedTimerY;
+		float s = NucleusMod.SPEEDRUN.speedTimerScale;
+		if (s < 0.5f || s > 3.0f) {
+			s = 1.0f;
+		}
 		int w1 = client.font.width(line1);
 		int w2 = line2 == null ? 0 : client.font.width(line2);
 		int wb = best == null ? 0 : client.font.width(best);
 		int wmax = Math.max(w1, Math.max(w2, wb));
 		int lines = 1 + (line2 == null ? 0 : 1) + (best == null ? 0 : 1);
 		int pad = 3;
-		gfx.fill(x - pad, y - pad, x + wmax + pad, y + lines * 10 - 1 + pad, HudTint.bg());
-		gfx.text(client.font, line1, x, y, color1, true);
-		int yy = y + 10;
-		if (line2 != null) {
-			gfx.text(client.font, line2, x, yy, color2, true);
-			yy += 10;
-		}
-		if (best != null) {
-			gfx.text(client.font, best, x, yy, 0xFFFFD700, true);
+		var pose = gfx.pose();
+		pose.pushMatrix();
+		pose.translate((float) x, (float) y);
+		pose.scale(s, s);
+		try {
+			gfx.fill(-pad, -pad, wmax + pad, lines * 10 - 1 + pad, HudTint.bg());
+			gfx.text(client.font, line1, 0, 0, color1, true);
+			int yy = 10;
+			if (line2 != null) {
+				gfx.text(client.font, line2, 0, yy, color2, true);
+				yy += 10;
+			}
+			if (best != null) {
+				gfx.text(client.font, best, 0, yy, 0xFFFFD700, true);
+			}
+		} finally {
+			pose.popMatrix();
 		}
 	}
 

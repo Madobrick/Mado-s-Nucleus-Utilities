@@ -40,9 +40,15 @@ public final class BalTimer {
 		if (raw == null) {
 			return;
 		}
-		String lower = raw.toLowerCase();
+		String lower = HollowsDetector.stripFormatting(raw).toLowerCase();
+		// Anyone can type the kill lines in chat — only the server's own
+		// lines (never player chat) may start the timer.
+		if (ChatLines.isPlayerChat(lower)) {
+			return;
+		}
 		if (lower.contains(TRIGGER_A) || lower.contains(TRIGGER_B)) {
 			start();
+			ObjectiveSounds.onObjective(ObjectiveSounds.Trigger.BAL);
 		} else if (lower.contains(TOPAZ_TRIGGER)) {
 			// Failsafe: the kill lines sometimes don't show, but the Topaz
 			// Crystal message does. "You placed the Topaz Crystal" (spawning

@@ -12,6 +12,9 @@
 		"sources": "https://hypixel.net/"
 	},
 	"license": "CC0-1.0",
+	"mixins": [
+		"nucleus.mixins.json"
+	],
 	"icon": "assets/nucleus/icon.png",
 	"environment": "*",
 	"entrypoints": {

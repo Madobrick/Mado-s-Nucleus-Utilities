@@ -67,8 +67,15 @@ public final class MadoBrickKeybinds {
 			return;
 		}
 		if (SET_WAYPOINTS != null) {
-			while (SET_WAYPOINTS.consumeClick()) {
-				captureFromPlayer(client);
+			if (NucleusMod.CONFIG.templeAutoPlace) {
+				// Automatic mode places them itself: swallow presses so no
+				// stale click fires a manual capture later.
+				while (SET_WAYPOINTS.consumeClick()) {
+				}
+			} else {
+				while (SET_WAYPOINTS.consumeClick()) {
+					captureFromPlayer(client);
+				}
 			}
 		}
 		if (SET_CUSTOM != null) {

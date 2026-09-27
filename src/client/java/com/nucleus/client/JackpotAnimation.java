@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 
 import com.nucleus.NucleusMod;
@@ -22,18 +23,21 @@ import com.nucleus.NucleusMod;
  */
 public final class JackpotAnimation {
 	public enum DropType {
-		DIVANS_ALLOY("Divan's Alloy", true, false, 0xFFFFD700),
-		JADE_DYE("Jade Dye", true, true, 0xFF55FF55),
-		QUICK_CLAW("Quick Claw", false, false, 0xFFAAAAAA);
+		DIVANS_ALLOY("Divan's Alloy", "M A X   W I N", true, false, 0xFFFFD700),
+		JADE_DYE("Jade Dye", "U L T R A   L E G E N D A R Y   M A X   W I N", true, true, 0xFF55FF55),
+		QUICK_CLAW("Quick Claw", "B I G   W I N", false, false, 0xFFAAAAAA);
 
 		public final String displayName;
+		/** MAXWIN headline, spaced for the casino look. */
+		public final String winText;
 		public final boolean intense;
 		/** Jade tier: even more coins, flash, motion and explosions. */
 		public final boolean mega;
 		public final int color;
 
-		DropType(String displayName, boolean intense, boolean mega, int color) {
+		DropType(String displayName, String winText, boolean intense, boolean mega, int color) {
 			this.displayName = displayName;
+			this.winText = winText;
 			this.intense = intense;
 			this.mega = mega;
 			this.color = color;
@@ -100,7 +104,8 @@ public final class JackpotAnimation {
 	private static double wheelTotal = 0;
 	private static Stage lastStage = null;
 	private static DropType lastLeader = null;
-	// Flapper (pointer) spring physics: pegs flick it as they pass.
+	// Classic spring flapper for the main spin; the deterministic curve
+	// takes over for the finale only (see flapperAngle).
 	private static double flapperAngle = 0;
 	private static double flapperVel = 0;
 	private static int lastPegIdx = -1;
@@ -143,6 +148,11 @@ public final class JackpotAnimation {
 		}
 		float s = speed();
 		long now = System.currentTimeMillis();
+		// Same drop re-detected (bundle line + announcement for one item):
+		// never restart a fresh spin, or the wheel visibly jumps.
+		if (active && t == type && now - seqStart < 3000L) {
+			return;
+		}
 		type = t;
 		active = true;
 		seqStart = now;
@@ -180,8 +190,6 @@ public final class JackpotAnimation {
 
 		lastStage = null;
 		lastLeader = null;
-		flapperAngle = 0;
-		flapperVel = 0;
 		lastPegIdx = -1;
 		lastKickSoundAt = 0L;
 		COINS.clear();
@@ -207,6 +215,15 @@ public final class JackpotAnimation {
 		return active;
 	}
 
+	/**
+	 * Cinematic mode is always on: the {@code Gui} mixin hides the entire
+	 * HUD pass (vanilla + other mods) while the wheel draws on top.
+	 * Our own overlays stand down via this flag.
+	 */
+	public static synchronized boolean cinematicActive() {
+		return active;
+	}
+
 	/** Hard stop: clears coins/timers so nothing lingers (world change). */
 	public static synchronized void stop() {
 		active = false;
@@ -224,8 +241,6 @@ public final class JackpotAnimation {
 		soundStep = 0;
 		lastStage = null;
 		lastLeader = null;
-		flapperAngle = 0;
-		flapperVel = 0;
 		lastPegIdx = -1;
 		lastKickSoundAt = 0L;
 	}
@@ -294,7 +309,7 @@ public final class JackpotAnimation {
 		return 1.0 - u * u * u * u * u;
 	}
 
-	/** Current wheel rotation in degrees (clockwise). */
+	/** Current wheel rotation in degrees (clockwise): one Quint ease. */
 	public static synchronized double wheelAngle() {
 		float p = stageProgress(Stage.WHEEL);
 		return wheelStartAngle + wheelTotal * easeOutQuint(p);
@@ -400,8 +415,27 @@ public final class JackpotAnimation {
 		} else if (stage == Stage.MAXWIN) {
 			tickMaxwinSounds(client, now, s, t);
 		} else {
-			// Let the flapper settle outside the wheel phase.
+			// Let the spring settle outside the wheel phase.
 			tickFlapperDecay((float) dt);
+		}
+	}
+
+	/**
+	 * Jackpot chime via the OS mixer (ignores Minecraft's volume sliders),
+	 * scaled by the mod's own "Jackpot volume" slider. Falls back to the
+	 * normal mixer path if decoding ever fails.
+	 */
+	private static void playJackpot(Minecraft client, SoundEvent event, float baseVolume, float pitch) {
+		try {
+			if (client == null || client.player == null) {
+				return;
+			}
+			float vol = baseVolume * NucleusMod.CONFIG.jackpotVolume / 100f;
+			if (NucleusMod.CONFIG.bypassMinecraftVolume && SystemAudio.play(event, vol, pitch)) {
+				return;
+			}
+			client.player.playSound(event, vol, pitch);
+		} catch (Exception ignored) {
 		}
 	}
 
@@ -409,8 +443,8 @@ public final class JackpotAnimation {
 		long now = System.currentTimeMillis();
 		if (stage == Stage.INTRO) {
 			try {
-				if (NucleusMod.CONFIG.jackpotSound && client.player != null) {
-					client.player.playSound(SoundEvents.FIREWORK_ROCKET_LAUNCH, 0.7f, 1.0f);
+				if (client.player != null) {
+					playJackpot(client, SoundEvents.FIREWORK_ROCKET_LAUNCH, 0.7f, 1.0f);
 				}
 			} catch (Exception ignored) {
 			}
@@ -424,10 +458,10 @@ public final class JackpotAnimation {
 			nextMegaAt = now;
 			soundStep = 0;
 			try {
-				if (NucleusMod.CONFIG.jackpotSound && client.player != null) {
-					client.player.playSound(SoundEvents.PLAYER_LEVELUP, 0.9f, 1.0f);
-					client.player.playSound(SoundEvents.END_PORTAL_FRAME_FILL, 0.9f, 1.0f);
-					client.player.playSound(SoundEvents.FIREWORK_ROCKET_LARGE_BLAST, 0.5f, 0.9f);
+				if (client.player != null) {
+					playJackpot(client, SoundEvents.PLAYER_LEVELUP, 0.9f, 1.0f);
+					playJackpot(client, SoundEvents.END_PORTAL_SPAWN, 0.9f, 1.0f);
+					playJackpot(client, SoundEvents.FIREWORK_ROCKET_LARGE_BLAST, 0.5f, 0.9f);
 				}
 			} catch (Exception ignored) {
 			}
@@ -459,11 +493,11 @@ public final class JackpotAnimation {
 				// hangs below the pivot, so a clockwise push is NEGATIVE in
 				// pose space (positive rotation swings a downward tip left).
 				flapperVel -= crossed * 7.0;
-				if (NucleusMod.CONFIG.jackpotSound && client.player != null
+				if (client.player != null
 					&& now - lastKickSoundAt > (long) (45 / s)) {
 					lastKickSoundAt = now;
 					try {
-						client.player.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP, 0.4f, 1.0f + 0.5f * p);
+						playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.4f, 1.0f + 0.5f * p);
 					} catch (Exception ignored) {
 					}
 				}
@@ -471,24 +505,24 @@ public final class JackpotAnimation {
 		}
 		lastPegIdx = idx;
 
-		// Flapper spring: pinned hard at speed, flapping as it slows.
-		tickFlapperDecay(dt);
-
 		lastLeader = leaderType();
-		if (!NucleusMod.CONFIG.jackpotSound || client.player == null) {
+		tickFlapperDecay(dt);
+		if (client.player == null) {
 			return;
 		}
 		// Heartbeat blasts near the landing.
 		if (p > 0.75f && now >= nextHeartAt) {
 			nextHeartAt = now + (long) (600 / s);
 			try {
-				client.player.playSound(SoundEvents.FIREWORK_ROCKET_BLAST, 0.22f, 0.5f);
+				playJackpot(client, SoundEvents.FIREWORK_ROCKET_BLAST, 0.22f, 0.5f);
 			} catch (Exception ignored) {
 			}
 		}
 	}
 
+	/** Tip pose straight from the spring. */
 	public static double flapperAngle() {
+		// Edging removed: spring only, always.
 		return flapperAngle;
 	}
 
@@ -505,7 +539,7 @@ public final class JackpotAnimation {
 	}
 
 	private static void tickMaxwinSounds(Minecraft client, long now, float s, DropType t) {
-		if (!NucleusMod.CONFIG.jackpotSound || client.player == null) {
+		if (client.player == null) {
 			return;
 		}
 		if (now >= nextSoundAt) {
@@ -515,21 +549,21 @@ public final class JackpotAnimation {
 			float pitch = 0.7f + (soundStep % 12) * 0.06f + p * 0.3f;
 			soundStep++;
 			try {
-				client.player.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP, 0.6f, pitch);
+				playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.6f, pitch);
 			} catch (Exception ignored) {
 			}
 		}
 		if (t.intense && now >= nextBlastAt) {
 			nextBlastAt = now + (long) ((t.mega ? 600L : 850L) / s);
 			try {
-				client.player.playSound(SoundEvents.FIREWORK_ROCKET_BLAST, 0.4f, 1.0f);
+				playJackpot(client, SoundEvents.FIREWORK_ROCKET_BLAST, 0.4f, 1.0f);
 			} catch (Exception ignored) {
 			}
 		}
 		if (t.mega && now >= nextMegaAt) {
 			nextMegaAt = now + (long) (1100 / s);
 			try {
-				client.player.playSound(SoundEvents.FIREWORK_ROCKET_LARGE_BLAST, 0.5f, 0.9f);
+				playJackpot(client, SoundEvents.FIREWORK_ROCKET_LARGE_BLAST, 0.5f, 0.9f);
 			} catch (Exception ignored) {
 			}
 		}

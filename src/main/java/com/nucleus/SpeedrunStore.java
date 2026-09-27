@@ -44,7 +44,7 @@ public class SpeedrunStore {
 		"amethyst", "Amethyst Crystal",
 		"bal", "Bal",
 		"topaz", "Topaz Crystal",
-		"place", "Place 1st crystal"
+		"place", "Place all crystals"
 	);
 
 	/** Split accent colors (RGB) used in HUD + config. */
@@ -54,7 +54,7 @@ public class SpeedrunStore {
 		"sapphire", 0x5555FF,
 		"tool", 0x2ECC71,
 		"jade", 0x55FF55,
-		"amethyst", 0xFF55FF,
+		"amethyst", 0x9933FF,
 		"bal", 0xFF5555,
 		"topaz", 0xFFFF55,
 		"place", 0x55FFFF
@@ -92,6 +92,10 @@ public class SpeedrunStore {
 	public Map<String, Long> bestSplits = new HashMap<>();
 	/** Best per-split segment durations (split took X on its own). */
 	public Map<String, Long> bestSegments = new HashMap<>();
+	/** Every finished segment duration per split, oldest first (capped, for averages). */
+	public Map<String, List<Long>> segmentHistory = new HashMap<>();
+	/** Cumulative split times of the best-total run, split id -> time. */
+	public Map<String, Long> bestRunSplits = new HashMap<>();
 	/** Gambler item ids dropped (fragment/jaderald/claw/alloy/jade). */
 	public Set<String> gamblerDrops = new HashSet<>();
 	/** Epoch millis of own Divan's Alloy drops, oldest first. */
@@ -106,6 +110,8 @@ public class SpeedrunStore {
 	public Map<String, Integer> unlockedTiers = new HashMap<>();
 	public int speedTimerX = 4;
 	public int speedTimerY = 4;
+	/** HUD text scale 0.5-3.0. */
+	public float speedTimerScale = 1.0f;
 
 	public void load() {
 		if (!Files.exists(PATH)) {
@@ -158,6 +164,17 @@ public class SpeedrunStore {
 			if (loaded.bestSegments != null) {
 				bestSegments = new HashMap<>(loaded.bestSegments);
 			}
+			if (loaded.segmentHistory != null) {
+				segmentHistory = new HashMap<>();
+				for (Map.Entry<String, List<Long>> e : loaded.segmentHistory.entrySet()) {
+					if (e.getKey() != null && e.getValue() != null) {
+						segmentHistory.put(e.getKey(), new ArrayList<>(e.getValue()));
+					}
+				}
+			}
+			if (loaded.bestRunSplits != null) {
+				bestRunSplits = new HashMap<>(loaded.bestRunSplits);
+			}
 			if (loaded.gamblerDrops != null) {
 				gamblerDrops = new HashSet<>(loaded.gamblerDrops);
 			}
@@ -176,6 +193,9 @@ public class SpeedrunStore {
 			}
 			speedTimerX = loaded.speedTimerX;
 			speedTimerY = loaded.speedTimerY;
+			if (loaded.speedTimerScale >= 0.5f && loaded.speedTimerScale <= 3.0f) {
+				speedTimerScale = loaded.speedTimerScale;
+			}
 		} catch (IOException e) {
 			NucleusMod.LOGGER.warn("Failed to read speedrun store: {}", e.getMessage());
 		}
@@ -190,13 +210,26 @@ public class SpeedrunStore {
 		}
 	}
 
+	/**
+	 * Resets all achievements (tiers, fun feats, gambler drops, alloy counts,
+	 * completed-run counter). Run history, bests and averages are kept.
+	 */
+	public void resetAchievements() {
+		unlockedFun = new HashSet<>();
+		unlockedTiers = new HashMap<>();
+		gamblerDrops = new HashSet<>();
+		alloyDrops = new ArrayList<>();
+		completedRuns = 0;
+		save();
+	}
+
 	/** Resets settings to defaults; run records and achievements are kept. */
-	public void resetSettings() {
-		order = new ArrayList<>(DEFAULT_ORDER);
+	public void resetSettings() {		order = new ArrayList<>(DEFAULT_ORDER);
 		enabled = new HashMap<>();
 		splitNames = new HashMap<>();
 		speedTimerX = 4;
 		speedTimerY = 4;
+		speedTimerScale = 1.0f;
 		save();
 	}
 
@@ -222,9 +255,9 @@ public class SpeedrunStore {
 	}
 
 	/**
-	 * Full run snapshot: user-ordered splits plus the locked "place first
-	 * crystal" split at the end (position can never move; start/return box
-	 * splits are implicit and likewise fixed).
+	 * Full run snapshot: user-ordered splits plus the locked "place all
+	 * crystals" split at the end (position can never move; the start box
+	 * is implicit and fixed).
 	 */
 	public List<String> runSnapshot() {
 		List<String> out = enabledOrderedIds();
@@ -255,12 +288,17 @@ public class SpeedrunStore {
 	/**
 	 * Records a finished run. Returns true if it is a new best total.
 	 * Per-split bests (cumulative) and per-segment bests update independently.
-	 * Totals history is capped.
+	 * Segment history feeds per-split averages; the best run's splits are
+	 * snapshotted for the history hover. Totals history is capped.
 	 */
 	public boolean submitRun(long totalMs, List<String> ids, List<Long> timesMs, List<Long> segmentMs) {
 		boolean newBest = bestTotalMs < 0 || totalMs < bestTotalMs;
 		if (newBest) {
 			bestTotalMs = totalMs;
+			bestRunSplits.clear();
+			for (int i = 0; i < ids.size() && i < timesMs.size(); i++) {
+				bestRunSplits.put(ids.get(i), timesMs.get(i));
+			}
 		}
 		for (int i = 0; i < ids.size() && i < timesMs.size(); i++) {
 			long t = timesMs.get(i);
@@ -275,6 +313,11 @@ public class SpeedrunStore {
 			if (prev == null || t < prev) {
 				bestSegments.put(ids.get(i), t);
 			}
+			List<Long> hist = segmentHistory.computeIfAbsent(ids.get(i), k -> new ArrayList<>());
+			hist.add(t);
+			while (hist.size() > 500) {
+				hist.remove(0);
+			}
 		}
 		runTotals.add(totalMs);
 		while (runTotals.size() > 5000) {
@@ -282,6 +325,21 @@ public class SpeedrunStore {
 		}
 		save();
 		return newBest;
+	}
+
+	/**
+	 * Mean segment duration for a split across finished runs (-1 when empty).
+	 */
+	public long segmentAverageMs(String id) {
+		List<Long> hist = segmentHistory.get(id);
+		if (hist == null || hist.isEmpty()) {
+			return -1;
+		}
+		long sum = 0;
+		for (long t : hist) {
+			sum += t;
+		}
+		return sum / hist.size();
 	}
 
 	/**

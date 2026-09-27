@@ -57,7 +57,7 @@ java {
 jar {
 	def projectName = project.name
 	inputs.property "projectName", projectName
-
+	archiveBaseName = "MadoNucUtilities"
 	from("LICENSE") {
 		rename { "${it}_$projectName"}
 	}

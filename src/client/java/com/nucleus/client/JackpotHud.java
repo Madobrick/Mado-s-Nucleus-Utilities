@@ -19,8 +19,11 @@ import com.nucleus.client.JackpotAnimation.Stage;
 
 /**
  * Casino "MAX WIN" overlay for rare drops: flashing backdrop, coin rain,
- * big MAX WIN text, item icon + name. Super intense for Divan's Alloy and
+ * big win text, item icon + name. Super intense for Divan's Alloy and
  * Jade Dye, lighter for Quick Claw.
+ *
+ * <p>Always a plain HUD layer, so movement and mouse stay free. In cinematic
+ * mode the Gui mixin hides the whole HUD pass underneath it.
  */
 public final class JackpotHud implements HudElement {
 	public static final JackpotHud INSTANCE = new JackpotHud();
@@ -30,7 +33,6 @@ public final class JackpotHud implements HudElement {
 	private static final Identifier CLAW_ID = NucleusMod.id("textures/jackpot/quick_claw.png");
 	private static final Identifier JADE_ID = NucleusMod.id("textures/jackpot/jade_dye.png");
 	private static final Identifier WHEEL_ID = NucleusMod.id("textures/jackpot/wheel.png");
-	private static final Identifier FLAPPER_ID = NucleusMod.id("textures/jackpot/flapper.png");
 	private static final Identifier DOT_ID = NucleusMod.id("textures/jackpot/dot.png");
 	private static final Identifier[] ALLOY_IDS = buildAlloyIds();
 
@@ -70,12 +72,17 @@ public final class JackpotHud implements HudElement {
 		if (!NucleusMod.CONFIG.jackpotEnabled || !JackpotAnimation.isActive()) {
 			return;
 		}
+		// Deliberately NOT Hollows-gated: the jackpot is the one feature
+		// that plays anywhere.
 		Minecraft client = Minecraft.getInstance();
 		if (client.level == null || client.player == null) {
 			return;
 		}
-		int w = gfx.guiWidth();
-		int h = gfx.guiHeight();
+		draw(gfx, client, gfx.guiWidth(), gfx.guiHeight());
+	}
+
+	/** Full jackpot show (intro / wheel / win) on any graphics context. */
+	public static void draw(GuiGraphicsExtractor gfx, Minecraft client, int w, int h) {
 		JackpotAnimation.setScreenSize(w, h);
 
 		DropType type = JackpotAnimation.type();
@@ -136,10 +143,16 @@ public final class JackpotHud implements HudElement {
 
 		boolean flashWhite = (now / 150L) % 2L == 0L;
 		int winColor = withAlpha(flashWhite && type.intense ? 0xFFFFFFFF : 0xFFFFD700, textAlpha);
-		String winText = "M A X   W I N";
-		int winW = (int) (client.font.width(winText) * 2.5f * u);
+		String winText = type.winText;
+		// Long headlines (ULTRA ...) shrink to fit instead of overflowing.
+		float winScale = 2.5f * u;
+		float naturalW = client.font.width(winText) * winScale;
+		if (naturalW > w * 0.92f) {
+			winScale *= (w * 0.92f) / naturalW;
+		}
+		int winW = (int) (client.font.width(winText) * winScale);
 		gfx.fill(cx - winW / 2 - 8, winY - 8, cx + winW / 2 + 8, winY - 5, withAlpha(0xFFFFD700, textAlpha));
-		scaledText(gfx, client.font, winText, cx, winY, 2.5f * u, winColor);
+		scaledText(gfx, client.font, winText, cx, winY, winScale, winColor);
 		gfx.fill(cx - winW / 2 - 8, winY + (int) (26 * u), cx + winW / 2 + 8, winY + (int) (29 * u), withAlpha(0xFFFFD700, textAlpha));
 
 		// Item icon (full texture scaled) + name.
@@ -193,44 +206,106 @@ public final class JackpotHud implements HudElement {
 		// the wheel slows. Slow ramp only, no flashing.
 		drawLeaderVignette(gfx, w, h);
 
+		// Wheel + pointer, drawn straight (no camera tricks).
+		drawWheelStageInner(gfx, client, w, h, cx, cy, r, theta, now);
+	}
+
+	private static void drawWheelStageInner(GuiGraphicsExtractor gfx, Minecraft client,
+		int w, int h, int cx, int cy, int r, double theta, long now) {
 		// Solid pre-rendered wheel: a single rotated blit (fast + perfectly round).
 		drawWheelTexture(gfx, cx, cy, theta, r);
+
+		// Rim bevel + chasing rivet lights, tight on the gold.
+		shadeRing(gfx, cx, cy, r - 1.5f, withAlpha(0xFFFFE36E, 46));
+		shadeRing(gfx, cx, cy, r * 0.875f, withAlpha(0xFF3A1A00, 64));
+		drawRimChase(gfx, cx, cy, r, now);
 
 		// Leader dot on the baked hub.
 		drawLeaderDot(gfx, cx, cy, r);
 
-		// Leader peg dots recolor with the leader.
-		drawPegDots(gfx, cx, cy, r);
-
-		// Smooth flapper sprite with spring physics; pivot follows wheel size
-		// so the tip grazes the pegs.
+		// Arrow pointer hanging from its ring mount; tip planted at peg depth.
+		// Dark outline backing first = one solid silhouette, then face.
 		float phi = (float) JackpotAnimation.flapperAngle();
 		int pivotX = cx;
-		int pivotY = cy - r - 36;
+		int pivotY = cy - r - 50;
 		var pose = gfx.pose();
 		pose.pushMatrix();
 		pose.translate(pivotX, pivotY);
 		pose.rotate(phi);
 		try {
-			if (hasTexture(FLAPPER_ID)) {
-				gfx.blit(RenderPipelines.GUI_TEXTURED, FLAPPER_ID, -13, 0, 0.0f, 0.0f, 26, 52, 26, 52, 26, 52, -1);
-			} else {
-				gfx.fill(-9, 0, 9, 3, 0xFF8B5A00);
-				gfx.fill(-6, 3, 6, 10, 0xFF2E6BF0);
-				gfx.fill(-3, 10, 3, 16, 0xFF7AA8FF);
-				gfx.fill(-1, 4, 1, 6, 0xFFFFFFFF);
+			// Classic down-arrow: dark outline, gold border, red face, glint.
+			// Two slopes only, so edges shimmer as one.
+			for (int yy = -2; yy <= 78; yy++) {
+				float hw = Math.max(0f, 26.5f * (1f - (yy + 8) / 86f));
+				aaSpan(gfx, -hw, hw, yy, 0xFF3A2400);
+			}
+			for (int yy = 0; yy <= 78; yy++) {
+				float hw = Math.max(0f, 23f * (1f - (yy + 8) / 86f));
+				aaSpan(gfx, -hw, hw, yy, 0xFFB8860B);
+			}
+			for (int yy = 5; yy <= 71; yy++) {
+				float hw = Math.max(0f, 16.5f * (1f - (yy + 8) / 86f));
+				aaSpan(gfx, -hw, hw, yy, 0xFFE03030);
+			}
+			for (int yy = 10; yy <= 54; yy++) {
+				float hw = Math.max(0f, 16.5f * (1f - (yy + 8) / 86f));
+				aaSpan(gfx, -hw, -hw + 4, yy, 0xFFFF9A9A);
 			}
 		} finally {
 			pose.popMatrix();
 		}
+		// Ring mount over the arrow's top: black outline, pale face,
+		// center bolt the arrow hangs from. Back by popular demand.
+		for (int dy = -27; dy <= 27; dy++) {
+			float hw = (float) Math.sqrt(Math.max(0, 27 * 27 - dy * dy));
+			aaSpan(gfx, pivotX - hw, pivotX + hw, pivotY + dy, 0xFF1A1A1A);
+		}
+		for (int dy = -23; dy <= 23; dy++) {
+			float hw = (float) Math.sqrt(Math.max(0, 23 * 23 - dy * dy));
+			aaSpan(gfx, pivotX - hw, pivotX + hw, pivotY + dy, 0xFFF5F5F5);
+		}
+		for (int dy = -19; dy <= 19; dy++) {
+			float hw = (float) Math.sqrt(Math.max(0, 19 * 19 - dy * dy));
+			aaSpan(gfx, pivotX - hw, pivotX + hw, pivotY + dy, 0xFFE8DCC0);
+		}
+		gfx.fill(pivotX - 2, pivotY - 2, pivotX + 3, pivotY + 3, 0xFF5C3D00);
 
-		// Current leader under the pointer — flickers fast, then edges slowly.
+		// Current leader under the pointer.
 		DropType leader = JackpotAnimation.leaderType();
 		scaledText(gfx, client.font, leader.displayName, cx, cy + r + 18, r / 60f, leader.color);
 	}
 
-	private static void drawLeaderVignette(GuiGraphicsExtractor gfx, int w, int h) {
-		float p = JackpotAnimation.stageProgress(Stage.WHEEL);
+	/** Dense shaded ring for tight metallic edge accents (reads solid). */
+	private static void shadeRing(GuiGraphicsExtractor gfx, int cx, int cy, float rad, int color) {
+		int n = Math.max(64, (int) (rad * 4.5f));
+		for (int i = 0; i < n; i++) {
+			double a = i * 2 * Math.PI / n;
+			int x = cx + (int) (rad * Math.sin(a));
+			int y = cy - (int) (rad * Math.cos(a));
+			gfx.fill(x - 1, y - 1, x + 1, y + 1, color);
+		}
+	}
+
+	/**
+	 * Chasing rivet lights: every third baked rivet flashes warm white in a
+	 * running sequence. Unlit rivets simply show the baked art underneath.
+	 */
+	private static void drawRimChase(GuiGraphicsExtractor gfx, int cx, int cy, int r, long now) {
+		long phase = now / 130L;
+		double theta = JackpotAnimation.wheelAngle();
+		for (int i = 0; i < 15; i++) {
+			if (((i + phase) % 3) != 0) {
+				continue;
+			}
+			double a = Math.toRadians(i * 24.0 + theta);
+			int x = cx + (int) (r * 0.925 * Math.sin(a));
+			int y = cy - (int) (r * 0.925 * Math.cos(a));
+			gfx.fill(x - 4, y - 4, x + 5, y + 5, 0xFFFFF0A0);
+			gfx.fill(x - 2, y - 2, x + 3, y + 3, 0xFFFFFFFF);
+		}
+	}
+
+	private static void drawLeaderVignette(GuiGraphicsExtractor gfx, int w, int h) {		float p = JackpotAnimation.stageProgress(Stage.WHEEL);
 		int base = 6 + (int) (30 * p * p);
 		int rgb = JackpotAnimation.segmentColor(JackpotAnimation.leaderType()) & 0x00FFFFFF;
 		// Thin steps so it reads as a smooth gradient, not bands/rectangles.
@@ -298,26 +373,6 @@ public final class JackpotHud implements HudElement {
 		}
 	}
 
-	/** Peg dots recolored with the leader, sitting on the baked pegs. */
-	private static void drawPegDots(GuiGraphicsExtractor gfx, int cx, int cy, int r) {
-		int size = Math.max(5, (int) (r * 0.058));
-		int color = 0xFF000000 | (JackpotAnimation.segmentColor(JackpotAnimation.leaderType()) & 0x00FFFFFF);
-		double theta = JackpotAnimation.wheelAngle();
-		for (double b : new double[] { 0, 24, 48, 72, 96, 120, 144, 168, 192, 216, 240, 264, 288, 312, 336 }) {
-			double rad = Math.toRadians(b + theta);
-			int x = cx + (int) (r * 0.929 * Math.sin(rad));
-			int y = cy - (int) (r * 0.929 * Math.cos(rad));
-			if (!hasTexture(DOT_ID)) {
-				gfx.fill(x - size / 2, y - size / 2, x + size / 2, y + size / 2, color);
-				continue;
-			}
-			try {
-				gfx.blit(RenderPipelines.GUI_TEXTURED, DOT_ID, x - size / 2, y - size / 2, 0.0f, 0.0f, size, size, 48, 48, 48, 48, color);
-			} catch (Exception ignored) {
-			}
-		}
-	}
-
 	private static void scaledText(GuiGraphicsExtractor gfx, Font font, String text, int cx, int y, float scale, int color) {
 		var pose = gfx.pose();
 		pose.pushMatrix();
@@ -333,6 +388,30 @@ public final class JackpotHud implements HudElement {
 
 	private static int withAlpha(int argb, int alpha) {
 		return (alpha << 24) | (argb & 0x00FFFFFF);
+	}
+
+	/**
+	 * 1px-tall antialiased span: full core plus fractional edge pixels, so
+	 * diagonal edges render straight instead of stair-steppy. rgb carries
+	 * no alpha; coverage supplies it.
+	 */
+	private static void aaSpan(GuiGraphicsExtractor gfx, float x0, float x1, int y, int rgb) {
+		if (x1 <= x0) {
+			return;
+		}
+		int cx0 = (int) Math.ceil(x0);
+		int cx1 = (int) Math.floor(x1);
+		if (cx1 > cx0) {
+			gfx.fill(cx0, y, cx1, y + 1, 0xFF000000 | rgb);
+		}
+		float la = cx0 - x0;
+		if (la > 0.02f && la < 0.999f) {
+			gfx.fill(cx0 - 1, y, cx0, y + 1, ((int) (la * 255) << 24) | rgb);
+		}
+		float ra = x1 - cx1;
+		if (ra > 0.02f && ra < 0.999f) {
+			gfx.fill(cx1, y, cx1 + 1, y + 1, ((int) (ra * 255) << 24) | rgb);
+		}
 	}
 
 	private static void drawItem(GuiGraphicsExtractor gfx, DropType type, int x, int y, int size, int alpha) {

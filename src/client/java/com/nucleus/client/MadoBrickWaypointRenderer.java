@@ -34,13 +34,16 @@ public final class MadoBrickWaypointRenderer {
 		if (!HollowsDetector.isInCrystalHollows()) {
 			return;
 		}
+		// Cinematic: the jackpot owns the screen, waypoints stand down.
+		if (JackpotAnimation.cinematicActive()) {
+			return;
+		}
 		boolean hasMain = MadoBrickWaypoints.hasWaypoints();
 		boolean hasCustom = MadoBrickWaypoints.hasCustom();
 		if (!hasMain && !hasCustom) {
 			return;
 		}
 		boolean throughWalls = NucleusMod.CONFIG.waypointsThroughWalls;
-		boolean tracer = NucleusMod.CONFIG.waypointTracer;
 		boolean text = NucleusMod.CONFIG.waypointText;
 		float outlineWidth = NucleusMod.CONFIG.waypointOutlineWidth;
 		if (outlineWidth < 0.5f) {
@@ -65,14 +68,6 @@ public final class MadoBrickWaypointRenderer {
 				var boxProps = Gizmos.cuboid(box, GizmoStyle.strokeAndFill(color, outlineWidth, fill));
 				if (throughWalls) {
 					boxProps.setAlwaysOnTop();
-				}
-
-				if (tracer) {
-					Vec3 target = Vec3.atCenterOf(wp.pos());
-					var lineProps = Gizmos.line(eye, target, color);
-					if (throughWalls) {
-						lineProps.setAlwaysOnTop();
-					}
 				}
 
 				if (text) {

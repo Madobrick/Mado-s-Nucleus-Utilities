@@ -9,9 +9,10 @@ import com.nucleus.NucleusMod;
 
 /**
  * Holds the 3 Temple waypoints plus one custom waypoint under the player's feet.
- * Offsets are relative to the player's block position at capture time:
+ * Offsets are relative to the origin block: the player's feet in Manual mode,
+ * the higher-X Door Guardian's feet in Automatic mode:
  * <ul>
- * <li>WP1: -4 x, +10 y, +65 z</li>
+ * <li>WP1: +3 x, +8 y, +63 z</li>
  * <li>WP2: +29 x, -32 y, +65 z</li>
  * <li>WP3: +29 x, -32 y, +48 z</li>
  * <li>Custom: block under the player's feet at capture time</li>
@@ -25,7 +26,7 @@ public final class MadoBrickWaypoints {
 	public static final int CUSTOM_INDEX = 3;
 
 	private static final int[][] OFFSETS = {
-		{ -4, 10, 65 },
+		{ 3, 8, 63 },
 		{ 29, -32, 65 },
 		{ 29, -32, 48 }
 	};
@@ -57,6 +58,12 @@ public final class MadoBrickWaypoints {
 		WAYPOINTS.clear();
 		lastOrigin = null;
 		clearCustom();
+	}
+
+	/** Clears only the 3 temple waypoints (custom ones survive mode switches). */
+	public static synchronized void clearTemple() {
+		WAYPOINTS.clear();
+		lastOrigin = null;
 	}
 
 	public static synchronized void addCustom(BlockPos feetBlockBelow) {

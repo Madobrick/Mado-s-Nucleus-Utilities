@@ -1,0 +1,13 @@
+{
+	"required": true,
+	"minVersion": "0.8",
+	"package": "com.nucleus.client.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"client": [
+		"GuiMixin",
+		"ClientPacketMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

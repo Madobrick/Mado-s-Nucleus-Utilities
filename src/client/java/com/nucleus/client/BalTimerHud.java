@@ -25,11 +25,17 @@ public final class BalTimerHud implements HudElement {
 		if (!NucleusMod.CONFIG.balTimerEnabled) {
 			return;
 		}
+		if (JackpotAnimation.cinematicActive()) {
+			return;
+		}
 		if (!HollowsDetector.isInCrystalHollows()) {
 			return;
 		}
 		Minecraft client = Minecraft.getInstance();
 		if (client.level == null || client.player == null) {
+			return;
+		}
+		if (client.screen instanceof MoveHudScreen) {
 			return;
 		}
 
@@ -46,13 +52,21 @@ public final class BalTimerHud implements HudElement {
 		String timerText = BalTimer.displayString();
 		int timerColor = BalTimer.displayColor();
 
+		float s = NucleusMod.CONFIG.balTimerScale;
+		if (s < 0.5f || s > 3.0f) {
+			s = 1.0f;
+		}
 		int pad = 3;
 		int textW = client.font.width(timerText);
-		int bgX1 = x - pad;
-		int bgY1 = y - pad;
-		int bgX2 = x + textW + pad;
-		int bgY2 = y + 9 + pad;
-		gfx.fill(bgX1, bgY1, bgX2, bgY2, HudTint.bg());
-		gfx.text(client.font, timerText, x, y, timerColor, true);
+		var pose = gfx.pose();
+		pose.pushMatrix();
+		pose.translate((float) x, (float) y);
+		pose.scale(s, s);
+		try {
+			gfx.fill(-pad, -pad, textW + pad, 9 + pad, HudTint.bg());
+			gfx.text(client.font, timerText, 0, 0, timerColor, true);
+		} finally {
+			pose.popMatrix();
+		}
 	}
 }

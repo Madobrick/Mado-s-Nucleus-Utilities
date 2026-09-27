@@ -40,6 +40,8 @@ public final class HollowsDetector {
 	};
 
 	private static boolean inHollows = false;
+	private static boolean inMines = false;
+	private static boolean inNucleus = false;
 	private static int ticksSinceLastCheck = 0;
 	private static long lastWarnAt = 0L;
 	private static ClientLevel warnLevel = null;
@@ -50,6 +52,8 @@ public final class HollowsDetector {
 
 	public static void reset() {
 		inHollows = false;
+		inMines = false;
+		inNucleus = false;
 		ticksSinceLastCheck = 0;
 		lastWarnAt = 0L;
 		warnLevel = null;
@@ -106,10 +110,14 @@ public final class HollowsDetector {
 		Optional<String> area = tabArea(client);
 		if (area.isPresent()) {
 			inHollows = area.get().toLowerCase().contains("crystal hollows");
-			return;
+		} else {
+			inHollows = detectsHollows(client);
+			maybeWarnNoArea(client);
 		}
-		inHollows = detectsHollows(client);
-		maybeWarnNoArea(client);
+		// Location details share the 1Hz poll so HUDs (per-frame) and
+		// trackers never scan the scoreboard themselves.
+		inMines = scanMines(client);
+		inNucleus = scanNucleus(client);
 	}
 
 	/**
@@ -156,6 +164,9 @@ public final class HollowsDetector {
 		if (client == null || client.gui == null) {
 			return;
 		}
+		if (!NucleusMod.CONFIG.tabWarnEnabled) {
+			return;
+		}
 		if (!NucleusMod.CONFIG.madoBrickEnabled
 			&& !NucleusMod.CONFIG.balTimerEnabled
 			&& !NucleusMod.CONFIG.jackpotEnabled) {
@@ -171,8 +182,13 @@ public final class HollowsDetector {
 			return;
 		}
 		lastWarnAt = now;
+		Component dismiss = Component.literal(" §c§l[Don't show again]").withStyle(style -> style
+			.withClickEvent(new net.minecraft.network.chat.ClickEvent.RunCommand("/mado notabwarn"))
+			.withHoverEvent(new net.minecraft.network.chat.HoverEvent.ShowText(
+				Component.literal("§7Hide this warning forever"))));
 		MadoChat.chat(client, Component.literal(
-			"§b[MNU] §7Tab Area widget not found — run §e/tab §7and enable the Info widget."));
+			"§b[MNU] §7Tab Area widget not found — run §e/tab §7and enable the Info widget.")
+			.append(dismiss));
 	}
 
 	private static boolean detectsHollows(Minecraft client) {
@@ -283,6 +299,58 @@ public final class HollowsDetector {
 		} catch (Exception ignored) {
 		}
 		return out;
+	}
+	/** True when the sidebar location is the Mines of Divan (1Hz cached). */
+	public static boolean inMinesOfDivan(Minecraft client) {
+		return inMines;
+	}
+
+
+	/** True when the sidebar location is the Crystal Nucleus (1Hz cached). */
+	public static boolean inCrystalNucleus(Minecraft client) {
+		return inNucleus;
+	}
+
+	private static boolean scanMines(Minecraft client) {
+		if (client == null || client.level == null) {
+			return false;
+		}
+		for (String line : sidebarLines(client)) {
+			if (line.contains("mines of divan")) {
+				return true;
+			}
+		}
+		// Same split-field hazard as the temple check: "Mines of Divan"
+		// is 17 chars with its icon, so it straddles prefix/suffix.
+		Scoreboard scoreboard = client.level.getScoreboard();
+		if (scoreboard != null) {
+			for (String line : combinedTeamLines(scoreboard)) {
+				if (line.contains("mines of divan")) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private static boolean scanNucleus(Minecraft client) {
+		if (client == null || client.level == null) {
+			return false;
+		}
+		for (String line : sidebarLines(client)) {
+			if (line.contains("crystal nucleus")) {
+				return true;
+			}
+		}
+		Scoreboard scoreboard = client.level.getScoreboard();
+		if (scoreboard != null) {
+			for (String line : combinedTeamLines(scoreboard)) {
+				if (line.contains("crystal nucleus")) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	/** Stripped sidebar lines (lowercase, formatting removed) for detection + debug. */

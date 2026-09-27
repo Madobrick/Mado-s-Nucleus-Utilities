@@ -16,15 +16,17 @@ import com.nucleus.NucleusMod;
 import com.nucleus.SpeedrunStore;
 
 /**
- * Custom achievement system. Locked achievements render as hidden ("???")
- * until any tier unlocks (tiered) or the feat happens (untiered).
+ * Custom achievement system. Locked achievements render grayed-out by name
+ * (no more "???") with a hoverable "how to get it" line; unlocked ones show
+ * colored with the same hover detail. Chat unlock messages carry the same
+ * hover description.
  * Tiers: bronze, silver, gold, diamond, netherite.
  */
 public final class Achievements {
 	public record Def(String id, String name, long[] thresholds, boolean lowerIsBetter) {
 	}
 
-	public record FunDef(String id, String name) {
+	public record FunDef(String id, String name, String desc) {
 	}
 
 	public static final String[] TIER_NAMES = { "Bronze", "Silver", "Gold", "Diamond", "Netherite" };
@@ -47,17 +49,20 @@ public final class Achievements {
 		"jade", "Jade Dye");
 
 	public static final FunDef[] FUN = {
-		new FunDef("dopamine", "Dopamine spike"),
-		new FunDef("slow", "Slow and steady"),
-		new FunDef("why", "Why"),
-		new FunDef("terraria", "Is that a terraria reference?"),
-		new FunDef("boomer", "Boomer"),
-		new FunDef("shouldve", "It shouldve been me!"),
-		new FunDef("good", "Good session"),
-		new FunDef("rngmeter", "Um, theres an rng meter"),
-		new FunDef("chestplate9", "Is that how you craft a divan's chestplate?"),
-		new FunDef("sword2", "Sword of Divan"),
-		new FunDef("cheater", "Cheater")
+		new FunDef("dopamine", "Tool dye?", "1/10k chance to get when you open a treasure chest"),
+		new FunDef("slow", "Slow and steady", "Finish a crystal run slower than 1 hour"),
+		new FunDef("why", "Why", "Give King Yolkar a Blue Goblin Egg"),
+		new FunDef("terraria", "Is that a terraria reference?", "Obtain a Recall Potion"),
+		new FunDef("boomer", "Boomer", "Give Professor Robot a robot part"),
+		new FunDef("shouldve", "It shouldve been me!", "Watch someone else drop Divan's Alloy"),
+		new FunDef("good", "Good session", "Drop 2 Divan's Alloys within 10 hours"),
+		new FunDef("rngmeter", "Um, theres an rng meter", "1000+ runs and still no alloy"),
+		new FunDef("chestplate9", "Is that how you craft a divan's chestplate?", "Drop 9 Divan's Alloys in total"),
+		new FunDef("sword2", "Sword of Divan", "Drop 2 Divan's Alloys in total"),
+		new FunDef("cheater", "Cheater", "Finish a run in 3-30 seconds (sus!)"),
+		new FunDef("cosmixi", "Is that... him?", "Share a lobby with Cosmixi"),
+		new FunDef("theguy", "the guy", "Share a lobby with Madobrick"),
+		new FunDef("double", "Double trouble!", "Pull 2 Jaderalds from one Nucleus bundle")
 	};
 
 	private static final long OWN_ALLOY_WINDOW_MS = 60_000L;
@@ -69,6 +74,8 @@ public final class Achievements {
 	private static int tickCount = 0;
 	private static Map<String, Integer> lastEggCounts = new HashMap<>();
 	private static Screen lastScreen = null;
+	/** Last time Yolkar's success dialogue was seen (blue-egg fix). */
+	private static long lastYolkarAt = 0L;
 
 	private Achievements() {
 	}
@@ -129,7 +136,7 @@ public final class Achievements {
 	/**
 	 * Recomputes achievement tiers from current counters. Upgrades announce
 	 * (when asked); downgrades apply silently so the display stays truthful
-	 * after manual /madobrick setRuns/setBest edits.
+	 * after manual /mado setRuns/setBest edits.
 	 */
 	public static void recheck(boolean announceUpgrades) {
 		long runs = NucleusMod.SPEEDRUN.completedRuns;
@@ -153,19 +160,34 @@ public final class Achievements {
 	}
 
 	private static void announce(Def def, int tier) {
-		announceName(def.name() + " [" + TIER_NAMES[tier] + "]", TIER_COLORS[tier] & 0xFFFFFF);
+		announceName(def.name() + " [" + TIER_NAMES[tier] + "]", TIER_COLORS[tier] & 0xFFFFFF,
+			progressText(def));
 		NucleusMod.LOGGER.info("Achievement unlocked: {} [{}]", def.name(), TIER_NAMES[tier]);
 	}
 
-	private static void announceName(String title, int rgb) {
+	private static void announceName(String title, int rgb, String how) {
 		Minecraft client = Minecraft.getInstance();
-		MadoChat.chat(client, Component.literal("§b[MNU] §6Achievement unlocked: §f")
-			.append(Component.literal(title).withColor(rgb)));
+		MadoChat.chat(client, Component.literal("§b[MNU] §3Achievement unlocked: §f")
+			.append(hoverable(Component.literal(title).withColor(rgb), how)));
 		try {
-			if (NucleusMod.CONFIG.jackpotSound && client.player != null) {
+			if (client.player != null) {
 				client.player.playSound(SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 0.9f, 1.0f);
 			}
 		} catch (Exception ignored) {
+		}
+	}
+
+	/** Wraps a name component with a "how you got it" hover tooltip. */
+	public static Component hoverable(Component name, String how) {
+		if (how == null || how.isEmpty()) {
+			return name;
+		}
+		try {
+			return name.copy().withStyle(style -> style.withHoverEvent(
+				new net.minecraft.network.chat.HoverEvent.ShowText(
+					Component.literal("§7" + how))));
+		} catch (Exception ignored) {
+			return name;
 		}
 	}
 
@@ -189,12 +211,29 @@ public final class Achievements {
 		return "next: " + GAMBLER_NAMES.get(GAMBLER_IDS[next]);
 	}
 
+	/** Short "how to get it" lines for the achievements tab. */
+	public static String tierDesc(Def def) {
+		if (def == RUNNER) {
+			return "Complete Crystal Nucleus runs";
+		}
+		return "Finish a full run under the target time";
+	}
+
+	public static String gamblerDesc() {
+		int next = gamblerTier() + 1;
+		if (next >= GAMBLER_IDS.length) {
+			return "All bundle drops collected";
+		}
+		return "Obtain a " + GAMBLER_NAMES.get(GAMBLER_IDS[next]);
+	}
+
 	public static void onGamblerDrop(String gamblerId) {
 		if (NucleusMod.SPEEDRUN.gamblerDrops.add(gamblerId)) {
 			int tier = gamblerTier();
 			if (tier > unlockedTier("gambler")) {
 				NucleusMod.SPEEDRUN.unlockedTiers.put("gambler", tier);
-				announceName("Pro Gambler [" + TIER_NAMES[tier] + "]", TIER_COLORS[tier] & 0xFFFFFF);
+				announceName("Pro Gambler [" + TIER_NAMES[tier] + "]", TIER_COLORS[tier] & 0xFFFFFF,
+					"Obtain a " + GAMBLER_NAMES.get(GAMBLER_IDS[tier]));
 				NucleusMod.LOGGER.info("Achievement unlocked: Pro Gambler [{}]", TIER_NAMES[tier]);
 			}
 			NucleusMod.SPEEDRUN.save();
@@ -212,14 +251,25 @@ public final class Achievements {
 		return id;
 	}
 
+	/** Short "how you got it" line, shown on hover in chat and the tab. */
+	public static String funDesc(String id) {
+		for (FunDef f : FUN) {
+			if (f.id().equals(id)) {
+				return f.desc();
+			}
+		}
+		return "";
+	}
+
 	public static void unlockFun(String id) {
 		if (NucleusMod.SPEEDRUN.unlockedFun.add(id)) {
 			NucleusMod.SPEEDRUN.save();
 			NucleusMod.LOGGER.info("Achievement unlocked: {}", funName(id));
 			Minecraft client = Minecraft.getInstance();
-			MadoChat.chat(client, Component.literal("§b[MNU] §6Achievement unlocked: §f" + funName(id)));
+			MadoChat.chat(client, Component.literal("§b[MNU] §3Achievement unlocked: §f")
+				.append(hoverable(Component.literal(funName(id)), funDesc(id))));
 			try {
-				if (NucleusMod.CONFIG.jackpotSound && client.player != null) {
+				if (client.player != null) {
 					client.player.playSound(SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 0.9f, 1.0f);
 				}
 			} catch (Exception ignored) {
@@ -274,15 +324,22 @@ public final class Achievements {
 		}
 		String norm = HollowsDetector.stripFormatting(raw).toLowerCase()
 			.replace("'", "").replace("’", "");
-		if (norm.contains("yolkar") && (norm.contains("well done") || norm.contains("covering you in my foul stench"))) {
-			checkBlueEgg();
+		// Yolkar's success dialogue is NPC-only; a player typing the same
+		// words must never count. Timestamp it — the egg check happens on
+		// the inventory scan, since handing the egg over precedes the text.
+		if (ChatLines.isNpc(norm) && norm.contains("yolkar")
+			&& (norm.contains("well done") || norm.contains("covering you in my foul stench"))) {
+			lastYolkarAt = System.currentTimeMillis();
+			ObjectiveSounds.onObjective(ObjectiveSounds.Trigger.YOLKAR);
 		}
-		if (norm.contains("recall potion")) {
-			unlockFun("terraria");
-		}
-		if (norm.contains("thanks for bringing me the") && !norm.contains("precursor apparatus")) {
+		// Professor Robot thanks you for quest parts — his line only, so
+		// other NPC thank-yous (or players) can't fire Boomer.
+		if (ChatLines.isNpc(norm) && norm.contains("professor robot")
+			&& (norm.contains("thanks for bringing") || norm.contains("thank you for bringing"))) {
 			unlockFun("boomer");
 		}
+		// Terraria reference fires on actually obtaining the potion
+		// (inventory scan below) — chat mentions don't count.
 	}
 
 	public static void tick(Minecraft client) {
@@ -301,9 +358,20 @@ public final class Achievements {
 			return;
 		}
 
-		// Blue-egg inventory baseline (1s cadence).
+		// Blue-egg tracking (1s cadence): the egg leaves the inventory at
+		// handover time, which is BEFORE Yolkar's success dialogue arrives —
+		// so watch for the decrease itself and only credit it near dialogue.
+		// (Recall Potions are bundle loot now: JackpotDetector unlocks
+		// "terraria" off the indented bundle line, no inventory poll.)
 		if (tickCount % 20 == 0) {
-			lastEggCounts = scanEggs(client);
+			Map<String, Integer> current = scanEggs(client);
+			int before = lastEggCounts.getOrDefault("blue goblin egg", 0);
+			int after = current.getOrDefault("blue goblin egg", 0);
+			if (after < before && now - lastYolkarAt < 30_000L) {
+				unlockFun("why");
+			}
+			lastEggCounts = current;
+			checkLobbyPlayers(client);
 		}
 
 		// Dopamine roll: fresh treasure-chest screen in Mines of Divan.
@@ -318,22 +386,37 @@ public final class Achievements {
 		}
 	}
 
-	private static void checkBlueEgg() {
-		Minecraft client = Minecraft.getInstance();
-		if (client.player == null) {
-			return;
-		}
-		Map<String, Integer> current = scanEggs(client);
-		int before = lastEggCounts.getOrDefault("blue goblin egg", 0);
-		int after = current.getOrDefault("blue goblin egg", 0);
-		lastEggCounts = current;
-		if (before - after >= 1) {
-			unlockFun("why");
+	/** Same-lobby player achievements (Cosmixi / Madobrick). */
+	private static void checkLobbyPlayers(Minecraft client) {
+		try {
+			var connection = client.getConnection();
+			if (connection == null) {
+				return;
+			}
+			for (var info : connection.getOnlinePlayers()) {
+				if (info == null) {
+					continue;
+				}
+				String name;
+				try {
+					name = info.getProfile().name();
+				} catch (Exception ignored) {
+					continue;
+				}
+				if (name == null) {
+					continue;
+				}
+				if (name.equalsIgnoreCase("Cosmixi")) {
+					unlockFun("cosmixi");
+				} else if (name.equalsIgnoreCase("Madobrick")) {
+					unlockFun("theguy");
+				}
+			}
+		} catch (Exception ignored) {
 		}
 	}
 
-	private static Map<String, Integer> scanEggs(Minecraft client) {
-		Map<String, Integer> out = new HashMap<>();
+	private static Map<String, Integer> scanEggs(Minecraft client) {		Map<String, Integer> out = new HashMap<>();
 		if (client.player == null) {
 			return out;
 		}
@@ -349,15 +432,15 @@ public final class Achievements {
 					continue;
 				}
 				String key = null;
-				if (name.equals("blue goblin egg")) {
+				if (name.contains("blue goblin egg")) {
 					key = "blue goblin egg";
-				} else if (name.equals("green goblin egg")) {
+				} else if (name.contains("green goblin egg")) {
 					key = "green goblin egg";
-				} else if (name.equals("red goblin egg")) {
+				} else if (name.contains("red goblin egg")) {
 					key = "red goblin egg";
-				} else if (name.equals("yellow goblin egg")) {
+				} else if (name.contains("yellow goblin egg")) {
 					key = "yellow goblin egg";
-				} else if (name.equals("goblin egg")) {
+				} else if (name.contains("goblin egg")) {
 					key = "goblin egg";
 				}
 				if (key != null) {
@@ -370,11 +453,6 @@ public final class Achievements {
 	}
 
 	private static boolean inMinesOfDivan(Minecraft client) {
-		for (String line : HollowsDetector.sidebarLines(client)) {
-			if (line.contains("mines of divan")) {
-				return true;
-			}
-		}
-		return false;
+		return HollowsDetector.inMinesOfDivan(client);
 	}
 }

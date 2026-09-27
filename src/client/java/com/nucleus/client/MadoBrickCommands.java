@@ -1,7 +1,5 @@
 package com.nucleus.client;
 
-import com.mojang.brigadier.arguments.IntegerArgumentType;
-import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -12,12 +10,11 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 
 import com.nucleus.NucleusMod;
-import com.nucleus.SpeedrunStore;
 
 /**
- * Client-side /madobrick command. Opens the config GUI by default.
- * Works on any server (including Hypixel) because it never touches the server.
- * The config opens anywhere; captures only work in the Crystal Hollows.
+ * The only client commands: /mado (config), /mado times|runs (run history),
+ * /mado stop (reset speedrun), /mado delete last|all (custom waypoints),
+ * /mado debug (diagnostics). Everything else was cut on purpose.
  */
 public final class MadoBrickCommands {
 	private MadoBrickCommands() {
@@ -25,29 +22,16 @@ public final class MadoBrickCommands {
 
 	public static void register() {
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
-			dispatcher.register(ClientCommands.literal("madobrick")
+			dispatcher.register(ClientCommands.literal("mado")
 				.executes(MadoBrickCommands::openGui)
-				.then(ClientCommands.literal("gui").executes(MadoBrickCommands::openGui))
-				.then(ClientCommands.literal("set").executes(MadoBrickCommands::setNow))
-				.then(ClientCommands.literal("clear").executes(MadoBrickCommands::clear))
-				.then(ClientCommands.literal("setRuns")
-					.then(ClientCommands.argument("count", IntegerArgumentType.integer(0, 10000000)).executes(MadoBrickCommands::setRuns)))
-				.then(ClientCommands.literal("setBest")
-					.then(ClientCommands.argument("time", StringArgumentType.greedyString()).executes(MadoBrickCommands::setBest)))
-				.then(ClientCommands.literal("setSplit")
-					.then(ClientCommands.argument("split", StringArgumentType.word())
-						.suggests((ctx, builder) -> {
-							String remaining = builder.getRemaining().toLowerCase(java.util.Locale.ROOT);
-							for (String id : SpeedrunStore.NAMES.keySet()) {
-								if (id.startsWith(remaining)) {
-									builder.suggest(id);
-								}
-							}
-							return builder.buildFuture();
-						})
-						.then(ClientCommands.argument("time", StringArgumentType.greedyString()).executes(MadoBrickCommands::setSplit))))
-				.then(ClientCommands.literal("alloy")
-					.then(ClientCommands.literal("test").executes(MadoBrickCommands::alloyTest))));
+				.then(ClientCommands.literal("times").executes(MadoBrickCommands::history))
+				.then(ClientCommands.literal("runs").executes(MadoBrickCommands::history))
+				.then(ClientCommands.literal("stop").executes(MadoBrickCommands::stop))
+				.then(ClientCommands.literal("delete")
+					.then(ClientCommands.literal("last").executes(MadoBrickCommands::deleteLast))
+					.then(ClientCommands.literal("all").executes(MadoBrickCommands::deleteAll)))
+				.then(ClientCommands.literal("debug").executes(MadoBrickCommands::debug))
+				.then(ClientCommands.literal("notabwarn").executes(MadoBrickCommands::noTabWarn)));
 		});
 	}
 
@@ -56,102 +40,71 @@ public final class MadoBrickCommands {
 		return 1;
 	}
 
-	private static int setNow(CommandContext<FabricClientCommandSource> ctx) {
+	private static int history(CommandContext<FabricClientCommandSource> ctx) {
+		SpeedrunManager.printHistory();
+		return 1;
+	}
+
+	private static int stop(CommandContext<FabricClientCommandSource> ctx) {
+		SpeedrunManager.resetRun();
+		return 1;
+	}
+
+	private static int deleteLast(CommandContext<FabricClientCommandSource> ctx) {
 		Minecraft client = Minecraft.getInstance();
 		if (client.player == null) {
 			MadoChat.err(ctx.getSource(), Component.literal("No player."));
 			return 0;
 		}
-		if (!MadoBrickKeybinds.captureFromPlayer(client)) {
-			return 0;
-		}
-		MadoChat.feedback(ctx.getSource(), Component.literal("§b[MNU] §fWaypoints set."));
+		MadoBrickKeybinds.removeLastCustom(client);
 		return 1;
 	}
 
-	private static int clear(CommandContext<FabricClientCommandSource> ctx) {
-		MadoBrickWaypoints.clear();
-		MadoChat.feedback(ctx.getSource(), Component.literal("§b[MNU] §fWaypoints cleared."));
+	private static int deleteAll(CommandContext<FabricClientCommandSource> ctx) {
+		MadoBrickWaypoints.clearCustom();
+		NucleusMod.CONFIG.save();
+		MadoChat.feedback(ctx.getSource(), Component.literal("§b[MNU] §fCustom waypoints cleared."));
 		return 1;
 	}
 
-	private static int setRuns(CommandContext<FabricClientCommandSource> ctx) {
-		int count = IntegerArgumentType.getInteger(ctx, "count");
-		NucleusMod.SPEEDRUN.completedRuns = count;
-		Achievements.recheck(true);
-		NucleusMod.SPEEDRUN.save();
-		MadoChat.feedback(ctx.getSource(), Component.literal("§b[MNU] §7Completed runs set to §e" + count + "§7."));
-		return 1;
-	}
-
-	private static int setBest(CommandContext<FabricClientCommandSource> ctx) {
-		long ms;
-		try {
-			ms = parseTimeMs(StringArgumentType.getString(ctx, "time"));
-		} catch (IllegalArgumentException e) {
-			MadoChat.err(ctx.getSource(), Component.literal("Bad time. Use seconds (90.5) or m:ss.t (1:30.5)."));
-			return 0;
-		}
-		NucleusMod.SPEEDRUN.bestTotalMs = ms;
-		Achievements.recheck(true);
-		NucleusMod.SPEEDRUN.save();
-		MadoChat.feedback(ctx.getSource(), Component.literal("§b[MNU] §7Best total set to §e" + SpeedrunStore.fmt(ms) + "§7."));
-		return 1;
-	}
-
-	private static int setSplit(CommandContext<FabricClientCommandSource> ctx) {
-		String id = StringArgumentType.getString(ctx, "split").toLowerCase();
-		if (!SpeedrunStore.NAMES.containsKey(id)) {
-			MadoChat.err(ctx.getSource(), Component.literal("Unknown split. Ids: " + String.join(", ", SpeedrunStore.NAMES.keySet())));
-			return 0;
-		}
-		long ms;
-		try {
-			ms = parseTimeMs(StringArgumentType.getString(ctx, "time"));
-		} catch (IllegalArgumentException e) {
-			MadoChat.err(ctx.getSource(), Component.literal("Bad time. Use seconds (41.2) or m:ss.t (0:41.2)."));
-			return 0;
-		}
-		NucleusMod.SPEEDRUN.bestSplits.put(id, ms);
-		NucleusMod.SPEEDRUN.save();
-		MadoChat.feedback(ctx.getSource(), Component.literal("§b[MNU] §7Best §f" + SpeedrunStore.NAMES.get(id)
-			+ " §7set to §e" + SpeedrunStore.fmt(ms) + "§7."));
-		return 1;
-	}
-
-	/** Parses "90", "90.5", "1:30" or "1:30.5" into millis. */
-	private static long parseTimeMs(String s) {
-		String t = s.trim();
-		if (t.isEmpty()) {
-			throw new IllegalArgumentException("empty");
-		}
-		long minutes = 0;
-		double secs;
-		if (t.contains(":")) {
-			String[] parts = t.split(":", -1);
-			if (parts.length != 2) {
-				throw new IllegalArgumentException("bad");
-			}
-			minutes = Long.parseLong(parts[0].trim());
-			secs = Double.parseDouble(parts[1].trim());
-		} else {
-			secs = Double.parseDouble(t);
-		}
-		if (minutes < 0 || secs < 0 || secs >= 3600 || minutes > 59) {
-			throw new IllegalArgumentException("range");
-		}
-		return minutes * 60_000L + (long) (secs * 1000L);
-	}
-
-	private static int hollows(CommandContext<FabricClientCommandSource> ctx) {
+	/** Dumps everything support would ask for: location, timers, pet, tracker, HUD state. */
+	private static int debug(CommandContext<FabricClientCommandSource> ctx) {
 		Minecraft client = Minecraft.getInstance();
-		boolean hollows = HollowsDetector.isInCrystalHollows();
-		MadoChat.feedback(ctx.getSource(), Component.literal(
-			"§b[MNU] §7Hollows: " + (hollows ? "§ayes" : "§cno")));
-		var lines = HollowsDetector.sidebarLines(client);
+		java.util.List<String> out = new java.util.ArrayList<>();
+		out.add("§b[MNU] §6§lDebug");
+		out.add("§7SkyBlock: " + yesNo(SkyBlockDetector.isOnSkyBlock())
+			+ " §7| Hollows: " + yesNo(HollowsDetector.isInCrystalHollows()));
+		HollowsDetector.tabArea(client).ifPresentOrElse(
+			a -> out.add("§7Tab Area: §f" + a),
+			() -> out.add("§7Tab Area: §c-"));
+		out.add("§7Jungle Temple: " + yesNo(HollowsDetector.isInJungleTemple(client))
+			+ " §7| Mines of Divan: " + yesNo(HollowsDetector.inMinesOfDivan(client)));
+		if (client.player != null) {
+			var pos = client.player.blockPosition();
+			out.add("§7Pos: §f" + pos.getX() + " " + pos.getY() + " " + pos.getZ());
+		}
+		out.add("§7Waypoints: §f" + MadoBrickWaypoints.snapshot().size()
+			+ " §7temple + §f" + MadoBrickWaypoints.customSnapshot().size() + " §7custom");
+		out.add("§7Speedrun: §f" + SpeedrunManager.state()
+			+ " §7(§f" + SpeedrunManager.splitIdx() + "§7/§f" + SpeedrunManager.runOrder().size() + "§7)"
+			+ (SpeedrunManager.afkPaused() ? " §e[AFK]" : ""));
+		out.add("§7Bal: §f" + BalTimer.displayString());
+		out.add("§7Jackpot: " + (JackpotAnimation.isActive()
+			? "§aactive §7(" + JackpotAnimation.type().displayName + ")" : "§8idle"));
+		out.add("§7Pet widget: " + (PetAlert.widgetFound() ? "§afound" : "§cnot found")
+			+ " §7| pet: §f" + (PetAlert.currentPet() == null ? "-" : PetAlert.currentPet())
+			+ " §7| placed: §e" + PetAlert.placedLobby());
+		out.add("§7Scavenger held: §f" + Scavenger.heldTools()
+			+ " §7| rate: §f" + String.format("%.1f", Scavenger.toolsPerHour()) + "/h"
+			+ " §7| sets: §e" + Scavenger.setsCompleted());
+		String day = LobbyDay.displayDay();
+		out.add("§7Lobby: §f" + (day.isEmpty() ? "-" : day + " | " + LobbyDay.displayLobby()));
+		for (String line : out) {
+			MadoChat.feedback(ctx.getSource(), Component.literal(line));
+		}
 		int shown = 0;
-		for (String line : lines) {
-			if (shown >= 8) {
+		for (String line : HollowsDetector.sidebarLines(client)) {
+			if (shown >= 6) {
 				break;
 			}
 			String match = HollowsDetector.matches(line) ? "§a<==" : "§8--";
@@ -162,9 +115,15 @@ public final class MadoBrickCommands {
 		return 1;
 	}
 
-	private static int alloyTest(CommandContext<FabricClientCommandSource> ctx) {
-		JackpotAnimation.start(JackpotAnimation.DropType.DIVANS_ALLOY);
-		MadoChat.feedback(ctx.getSource(), Component.literal("§b[MNU] §7Jackpot test: §6Divan's Alloy"));
+	private static int noTabWarn(CommandContext<FabricClientCommandSource> ctx) {
+		NucleusMod.CONFIG.tabWarnEnabled = false;
+		NucleusMod.CONFIG.save();
+		MadoChat.feedback(ctx.getSource(),
+			Component.literal("§b[MNU] §7the annoying /tab message will no longer bother you :c"));
 		return 1;
+	}
+
+	private static String yesNo(boolean v) {
+		return v ? "§ayes" : "§cno";
 	}
 }

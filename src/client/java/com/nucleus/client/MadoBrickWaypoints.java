@@ -91,6 +91,58 @@ public final class MadoBrickWaypoints {
 		return new ArrayList<>(CUSTOM_WAYPOINTS);
 	}
 
+	/** Clipboard tag: MNUW1|x,y,z|... (custom waypoints only, never temple). */
+	private static final String EXPORT_TAG = "MNUW1";
+
+	/** Compact export text, or empty when there is nothing to copy. */
+	public static synchronized String exportCustom() {
+		if (CUSTOM_WAYPOINTS.isEmpty()) {
+			return "";
+		}
+		StringBuilder sb = new StringBuilder(EXPORT_TAG);
+		for (Waypoint wp : CUSTOM_WAYPOINTS) {
+			BlockPos p = wp.pos();
+			sb.append('|').append(p.getX()).append(',')
+				.append(p.getY()).append(',').append(p.getZ());
+		}
+		return sb.toString();
+	}
+
+	/**
+	 * Parses export text back into custom waypoints (same 100 cap as manual
+	 * adds). Returns how many were placed, 0 when the clipboard holds no
+	 * waypoint data.
+	 */
+	public static synchronized int importCustom(String text) {
+		if (text == null) {
+			return 0;
+		}
+		String t = text.trim();
+		if (!t.startsWith(EXPORT_TAG + "|")) {
+			return 0;
+		}
+		int placed = 0;
+		for (String part : t.substring(EXPORT_TAG.length() + 1).split("\\|")) {
+			String[] xyz = part.split(",");
+			if (xyz.length != 3) {
+				continue;
+			}
+			try {
+				int x = clampCoord(Integer.parseInt(xyz[0].trim()));
+				int y = clampCoord(Integer.parseInt(xyz[1].trim()));
+				int z = clampCoord(Integer.parseInt(xyz[2].trim()));
+				addCustom(new BlockPos(x, y, z));
+				placed++;
+			} catch (NumberFormatException ignored) {
+			}
+		}
+		return placed;
+	}
+
+	private static int clampCoord(int v) {
+		return Math.max(-30000000, Math.min(30000000, v));
+	}
+
 	public static synchronized boolean hasCustom() {
 		return !CUSTOM_WAYPOINTS.isEmpty();
 	}

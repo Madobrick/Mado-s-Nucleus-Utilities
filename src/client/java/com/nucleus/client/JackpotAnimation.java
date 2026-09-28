@@ -4,8 +4,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.Component;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.util.Mth;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 import com.nucleus.NucleusMod;
 
@@ -42,6 +47,62 @@ public final class JackpotAnimation {
 			this.mega = mega;
 			this.color = color;
 		}
+
+		/**
+		 * The real item for totem popups and HUD icons (NEU item DB form):
+		 * Alloy rides on paper (its true vanilla base), Claw and Jade are
+		 * player heads wearing their skins. Built once and shared — neither
+		 * the totem nor the HUD mutates the stack.
+		 */
+		public ItemStack stack() {
+			return switch (this) {
+				case DIVANS_ALLOY -> alloyStack();
+				case QUICK_CLAW -> clawStack();
+				case JADE_DYE -> jadeStack();
+			};
+		}
+	}
+
+	private static ItemStack alloyStack;
+	private static ItemStack clawStack;
+	private static ItemStack jadeStack;
+
+	private static synchronized ItemStack alloyStack() {
+		if (alloyStack == null) {
+			// NEU DIVAN_ALLOY: paper base wearing Hypixel's own alloy
+			// model. With the server pack on Hypixel this renders as the
+			// actual Divan's Alloy; without it, plain paper (same as the
+			// real item behaves).
+			ItemStack s = new ItemStack(Items.PAPER);
+			s.set(DataComponents.CUSTOM_NAME, Component.literal("§6Divan's Alloy"));
+			try {
+				s.set(DataComponents.ITEM_MODEL, net.minecraft.resources.Identifier.fromNamespaceAndPath(
+					"hypixel_skyblock", "item/uncategorized/divans_alloy"));
+			} catch (Exception ignored) {
+			}
+			alloyStack = s;
+		}
+		return alloyStack;
+	}
+
+	private static synchronized ItemStack clawStack() {
+		if (clawStack == null) {
+			// NEU PET_ITEM_QUICK_CLAW, skull, no slim metadata on its skin.
+			clawStack = DyeCelebration.head(
+				"6312a5a12ecb24d6852db388e6a34721cc67f522ccde7e824b9f75e95036ac93",
+				"490f6025-7f41-322a-9c7a-9d1cf91ee0ae", "§6Quick Claw", false);
+		}
+		return clawStack;
+	}
+
+	private static synchronized ItemStack jadeStack() {
+		if (jadeStack == null) {
+			// NEU DYE_JADE, skull with slim skin metadata.
+			jadeStack = DyeCelebration.head(
+				"8b215ff671f111e98d17a473fda8e5e9d0425ccd6e79426654ccb55f3f6c0c652",
+				"166f868f-8eee-3af1-8a93-9b94b06ec041", "§2Jade Dye", true);
+		}
+		return jadeStack;
 	}
 
 	/**
@@ -425,7 +486,7 @@ public final class JackpotAnimation {
 	 * scaled by the mod's own "Jackpot volume" slider. Falls back to the
 	 * normal mixer path if decoding ever fails.
 	 */
-	private static void playJackpot(Minecraft client, SoundEvent event, float baseVolume, float pitch) {
+	static void playJackpot(Minecraft client, SoundEvent event, float baseVolume, float pitch) {
 		try {
 			if (client == null || client.player == null) {
 				return;
@@ -452,11 +513,14 @@ public final class JackpotAnimation {
 			lastLeader = null;
 			nextHeartAt = now;
 		} else {
-			// MAXWIN opening: flash is rendered; fanfare here.
+			// MAXWIN opening: flash is rendered; fanfare here, plus the
+			// 3D item pop stretched across the whole phase (same popup
+			// the dye celebration uses, timed to its screen).
 			nextSoundAt = now;
 			nextBlastAt = now;
 			nextMegaAt = now;
 			soundStep = 0;
+			fireTotem(type());
 			try {
 				if (client.player != null) {
 					playJackpot(client, SoundEvents.PLAYER_LEVELUP, 0.9f, 1.0f);
@@ -517,6 +581,29 @@ public final class JackpotAnimation {
 				playJackpot(client, SoundEvents.FIREWORK_ROCKET_BLAST, 0.22f, 0.5f);
 			} catch (Exception ignored) {
 			}
+		}
+	}
+
+	/** One Totem-style pop for the drop, stretched across its whole phase. */
+	private static void fireTotem(DropType t) {
+		try {
+			if (t == null) {
+				return;
+			}
+			ItemStack stack = t.stack();
+			if (stack != null && !stack.isEmpty()) {
+				int ticks = Mth.clamp(Math.round(maxwinMs(t) / 50f / speed()), 1, 200);
+				// Claw's paw lives on the head's side: park the readable
+				// dwell there, otherwise it only flashes by mid-sweep.
+				// Alloy gets a slight turn so its face catches the light.
+				float yaw = switch (t) {
+					case QUICK_CLAW -> 160f;
+					case DIVANS_ALLOY -> 180f;
+					default -> 0f;
+				};
+				ItemPopup.popup(stack.copy(), ticks, false, true, true, yaw);
+			}
+		} catch (Exception ignored) {
 		}
 	}
 

@@ -16,6 +16,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import com.nucleus.client.CrystalTracker;
 import com.nucleus.client.NpcTradeWatch;
 import com.nucleus.client.NucleusClient;
+import com.nucleus.client.SafeMode;
 
 /**
  * Two pre-filter hooks. Chat is seen here BEFORE other mods can hide it, so
@@ -49,6 +50,19 @@ public class ClientPacketMixin {
 	private void nucleus$onSubtitle(ClientboundSetSubtitleTextPacket packet, CallbackInfo ci) {
 		try {
 			CrystalTracker.onTitleText(packet.text().getString());
+		} catch (Exception ignored) {
+		}
+	}
+
+	// SAFE MODE lives here (not on a chat event) so warps fired straight
+	// from other mods — no chat screen involved — are cancelled too.
+	@Inject(method = "sendCommand", at = @At("HEAD"), cancellable = true)
+	private void nucleus$onSendCommand(String command, CallbackInfo ci) {
+		try {
+			if (SafeMode.shouldBlock(command)) {
+				ci.cancel();
+				SafeMode.onBlocked(command);
+			}
 		} catch (Exception ignored) {
 		}
 	}

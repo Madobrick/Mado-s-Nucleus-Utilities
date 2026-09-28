@@ -5,7 +5,8 @@
 	"compatibilityLevel": "JAVA_25",
 	"client": [
 		"GuiMixin",
-		"ClientPacketMixin"
+		"ClientPacketMixin",
+		"GameRendererMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

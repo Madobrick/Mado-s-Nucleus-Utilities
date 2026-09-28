@@ -101,6 +101,7 @@ public class MadoBrickScreen extends Screen {
 	private int catWaypointsCustomY = -1;
 	private int catPlaybackY = -1;
 	private int catTriggersY = -1;
+	private int catSafeY = -1;
 
 	// Scroll state for the long tabs (Features/Waypoints/Sounds): content
 	// widgets keep base Y positions and are shifted by moreScroll; rows
@@ -252,6 +253,7 @@ public class MadoBrickScreen extends Screen {
 		catWaypointsCustomY = -1;
 		catPlaybackY = -1;
 		catTriggersY = -1;
+		catSafeY = -1;
 		moreBaseY.clear();
 
 		int cx = this.width / 2;
@@ -307,7 +309,7 @@ public class MadoBrickScreen extends Screen {
 	}
 
 	/** Split row: rename box (25 chars) + ON/OFF toggle + optional move arrows. */
-	private int addSplitRow(int cx, int y, String splitId, boolean movable) {
+	private int addSplitRow(int cx, int y, String splitId, boolean movable, boolean toggleable) {
 		final String id = splitId;
 		EditBox nameBox = new EditBox(this.font, cx - 150, y, 168, 18,
 			Component.literal("Split name"));
@@ -317,12 +319,20 @@ public class MadoBrickScreen extends Screen {
 		nameBox.setTextColor(com.nucleus.SpeedrunStore.colorOf(id) | 0xFF000000);
 		tip(nameBox, "Rename this split.");
 		addRenderableWidget(nameBox);
-		Button toggleButton = Button.builder(toggleLabel(NucleusMod.SPEEDRUN.isEnabled(id)), btn -> {
-			boolean next = !NucleusMod.SPEEDRUN.isEnabled(id);
-			NucleusMod.SPEEDRUN.setEnabled(id, next);
-			btn.setMessage(toggleLabel(next));
-		}).pos(cx + 22, y).size(52, 20).build();
-		tip(toggleButton, "Include this split in runs.");
+		Button toggleButton;
+		if (toggleable) {
+			toggleButton = Button.builder(toggleLabel(NucleusMod.SPEEDRUN.isEnabled(id)), btn -> {
+				boolean next = !NucleusMod.SPEEDRUN.isEnabled(id);
+				NucleusMod.SPEEDRUN.setEnabled(id, next);
+				btn.setMessage(toggleLabel(next));
+			}).pos(cx + 22, y).size(52, 20).build();
+			tip(toggleButton, "Include this split in runs.");
+		} else {
+			toggleButton = Button.builder(toggleLabel(true), btn -> {
+			}).pos(cx + 22, y).size(52, 20).build();
+			toggleButton.active = false;
+			tip(toggleButton, "The final split is always on —\nwithout it a run could never finish.");
+		}
 		addRenderableWidget(toggleButton);
 		if (movable) {
 			Button upButton = Button.builder(Component.literal("▲"), btn -> {
@@ -350,12 +360,26 @@ public class MadoBrickScreen extends Screen {
 		int y = startY;
 		int rowH = 22;
 
+		Checkbox timerBox = Checkbox.builder(Component.literal("Speedrun timer"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.speedrunEnabled)
+			.onValueChange((box, val) -> {
+				NucleusMod.CONFIG.speedrunEnabled = val;
+				if (!val) {
+					SpeedrunManager.onLeave();
+				}
+				NucleusMod.CONFIG.save();
+			}).build();
+		tip(timerBox, "Master switch for the speedrun timer.\nThe Place split can never be turned off.");
+		addRenderableWidget(timerBox);
+		y += rowH;
+
 		for (String id : new java.util.ArrayList<>(NucleusMod.SPEEDRUN.order)) {
-			y = addSplitRow(cx, y, id, true);
+			y = addSplitRow(cx, y, id, true, true);
 		}
 
-		// Locked "place all crystals" split: always last, no move buttons.
-		y = addSplitRow(cx, y, "place", false);
+		// Locked "place all crystals" split: always last, no move buttons,
+		// no toggle.
+		y = addSplitRow(cx, y, "place", false, false);
 
 		Button skipButton = Button.builder(Component.literal("Skip split"), btn -> SpeedrunManager.skipSplit())
 			.pos(cx - 150, y).size(145, 20).build();
@@ -452,6 +476,16 @@ public class MadoBrickScreen extends Screen {
 		outlineBox.setHint(Component.literal("e.g. 3.0"));
 		tip(outlineBox, "Thickness of the waypoint boxes.");
 		addRenderableWidget(outlineBox);
+		y += rowH;
+
+		Checkbox linkBox = Checkbox.builder(Component.literal("Link jungle waypoints"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.templeLinkLines)
+			.onValueChange((box, val) -> {
+				NucleusMod.CONFIG.templeLinkLines = val;
+				NucleusMod.CONFIG.save();
+			}).build();
+		tip(linkBox, "Draws lines WP1 -> WP2 -> WP3.\nJungle Temple waypoints only, never custom ones.");
+		addRenderableWidget(linkBox);
 		y += rowH;
 
 		show1Box = Checkbox.builder(Component.literal("Show Waypoint 1 (+3,+8,+63)"), this.font)
@@ -567,6 +601,42 @@ public class MadoBrickScreen extends Screen {
 		// Footnote for this section, drawn right above the next header.
 		moreCustomNoteY = y;
 		y += 14;
+
+		Button exportButton = Button.builder(Component.literal("Export waypoints"), btn -> {
+			String data = MadoBrickWaypoints.exportCustom();
+			if (data.isEmpty()) {
+				MadoChat.chat(Minecraft.getInstance(),
+					Component.literal("§b[MNU] §7No custom waypoints to export."));
+				return;
+			}
+			try {
+				Minecraft.getInstance().keyboardHandler.setClipboard(data);
+				MadoChat.chat(Minecraft.getInstance(), Component.literal(
+					"§b[MNU] §fExported §e" + MadoBrickWaypoints.customCount()
+						+ " §fcustom waypoints to clipboard."));
+			} catch (Exception ignored) {
+			}
+		}).pos(cx - 150, y).size(145, 20).build();
+		tip(exportButton, "Copies your current waypoint data to clipboard.");
+		addRenderableWidget(exportButton);
+		Button importButton = Button.builder(Component.literal("Import waypoints"), btn -> {
+			String data = null;
+			try {
+				data = Minecraft.getInstance().keyboardHandler.getClipboard();
+			} catch (Exception ignored) {
+			}
+			int n = MadoBrickWaypoints.importCustom(data);
+			if (n <= 0) {
+				MadoChat.chat(Minecraft.getInstance(),
+					Component.literal("§b[MNU] §7Clipboard has no waypoint data."));
+			} else {
+				MadoChat.chat(Minecraft.getInstance(), Component.literal(
+					"§b[MNU] §fImported §e" + n + " §fcustom waypoints."));
+			}
+		}).pos(cx + 5, y).size(145, 20).build();
+		tip(importButton, "Imports waypoints from your clipboard.");
+		addRenderableWidget(importButton);
+		y += rowH + 4;
 
 		finishScrollable(Tab.WAYPOINTS, cx, y);
 	}
@@ -703,6 +773,20 @@ public class MadoBrickScreen extends Screen {
 			NucleusMod.CONFIG.timerBg, v -> NucleusMod.CONFIG.timerBg = v);
 		tip(timerBgSlider, "Background shade behind timer text.");
 		addRenderableWidget(timerBgSlider);
+		y += rowH;
+
+		// --- Safe mode ---
+		catSafeY = y;
+		y += 14;
+
+		Checkbox safeBox = Checkbox.builder(Component.literal("Safe mode"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.safeMode)
+			.onValueChange((box, val) -> {
+				NucleusMod.CONFIG.safeMode = val;
+				NucleusMod.CONFIG.save();
+			}).build();
+		tip(safeBox, "Blocks every /warp except /warp nucleus|cn.\nCatches warps fired straight from other mods.\nToggle with /mado safe.");
+		addRenderableWidget(safeBox);
 		y += rowH;
 
 		// --- Misc ---
@@ -1071,6 +1155,9 @@ public class MadoBrickScreen extends Screen {
 			}
 			if (catMobsY >= 0) {
 				drawMoreHeader(gfx, "— Mob highlights —", catMobsY, viewportBottom);
+			}
+			if (catSafeY >= 0) {
+				drawMoreHeader(gfx, "— Safe mode —", catSafeY, viewportBottom);
 			}
 			if (catMiscY >= 0) {
 				drawMoreHeader(gfx, "— Misc —", catMiscY, viewportBottom);

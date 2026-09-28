@@ -39,12 +39,26 @@ public final class ObjectiveSounds {
 	private static final java.util.regex.Pattern TREASURE_FOUND =
 		java.util.regex.Pattern.compile("you found .+ with your metal detector");
 
-	/** Split completion (Speedruns tab splits + skips). */
-	public static void onSplit() {
-		if (!NucleusMod.CONFIG.objectiveSoundOn) {
-			return;
+	/** Fake Tool Dye lottery: 1/25k per treasure find, same hook as above. */
+	private static void maybeRollDye() {
+		try {
+			if (java.util.concurrent.ThreadLocalRandom.current().nextInt(DyeCelebration.ODDS) != 0) {
+				return;
+			}
+			Minecraft client = Minecraft.getInstance();
+			if (client == null || client.player == null) {
+				return;
+			}
+			String name;
+			try {
+				name = client.player.getScoreboardName();
+			} catch (Exception ignored) {
+				name = "Player";
+			}
+			Achievements.unlockFun("dopamine");
+			DyeCelebration.preview(client, name);
+		} catch (Exception ignored) {
 		}
-		play(false, 1.0f);
 	}
 
 	/** Any tracked run objective (needs master toggle + its own toggle). */
@@ -104,6 +118,7 @@ public final class ObjectiveSounds {
 		// moment. X is a wildcard (loot name), never a literal.
 		if (TREASURE_FOUND.matcher(norm).find()) {
 			onObjective(Trigger.CHEST);
+			maybeRollDye();
 		}
 		// Same message naming a scavenged tool: also the tool moment.
 		if (norm.contains("with your metal detector") && norm.contains("scavenged")) {

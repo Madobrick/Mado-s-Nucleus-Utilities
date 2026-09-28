@@ -5,6 +5,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientEntityEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 
 import net.minecraft.client.Minecraft;
@@ -33,6 +34,7 @@ public class NucleusClient implements ClientModInitializer {
 			CrystalTracker.reset();
 			MobMarkers.clear();
 			NpcTradeWatch.reset();
+			DyeCelebration.reset();
 		});
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
 			MadoBrickWaypoints.clear();
@@ -48,6 +50,7 @@ public class NucleusClient implements ClientModInitializer {
 			CrystalTracker.reset();
 			MobMarkers.clear();
 			NpcTradeWatch.reset();
+			DyeCelebration.reset();
 		});
 
 		ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
@@ -60,6 +63,14 @@ public class NucleusClient implements ClientModInitializer {
 
 
 		UseEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
+			try {
+				NpcTradeWatch.onInteract(entity);
+			} catch (Exception ignored) {
+			}
+			return InteractionResult.PASS;
+		});
+		// Handovers also work with a left-click: same touch tracking.
+		AttackEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
 			try {
 				NpcTradeWatch.onInteract(entity);
 			} catch (Exception ignored) {
@@ -81,6 +92,7 @@ public class NucleusClient implements ClientModInitializer {
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "lobby-day"), LobbyDayHud.INSTANCE);
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "scavenger"), ScavengerHud.INSTANCE);
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "alerts"), AlertHud.INSTANCE);
+		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "dye"), DyeHud.INSTANCE);
 
 		MadoBrickWaypointRenderer.register();
 		MobHighlightRenderer.register();
@@ -128,6 +140,7 @@ public class NucleusClient implements ClientModInitializer {
 		MadoBrickIslandWatcher.tick(client);
 		BalTimer.tick(client);
 		JackpotAnimation.tick(client);
+		ItemPopup.tick();
 		SpeedrunManager.tick(client);
 		Scavenger.tick(client);
 		PetAlert.tick(client);

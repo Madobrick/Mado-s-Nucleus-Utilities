@@ -29,6 +29,10 @@ dependencies {
 
 	// Fabric API. This is technically optional, but you probably want it anyway.
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// MP3 decoder for the bundled dye sting (LGPL, jar-in-jarred below).
+	implementation "com.googlecode.soundlibs:jlayer:1.0.1.4"
+	include "com.googlecode.soundlibs:jlayer:1.0.1.4"
 }
 
 processResources {

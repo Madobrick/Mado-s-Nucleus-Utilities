@@ -33,11 +33,14 @@ import com.nucleus.SpeedrunStore;
  * item form, so there is no pickup event; NPC lines are excluded so
  * Yolkar's "stealing her Amber Crystal" can't false-fire, and player chat
  * is excluded so copycats can't fire splits.</li>
- * <li>Bal area: sidebar location contains magma/khazad.</li>
- * <li>Topaz: "topaz crystal" chat like the others, plus Bal-kill lines
- * (shared with the Bal timer) since Bal's death ≈ Topaz obtain.</li>
- * <li>Place: counts "You placed the X Crystal!" lines; the 5th one ends
- * the run.</li>
+ * <li>Bal: Bal's defeat lines ("looks weak and tired" / "retreats into
+ * the lava", shared with the Bal timer) — entering the area alone completes
+ * nothing.</li>
+ * <li>Topaz: "topaz crystal" chat like the others, plus the same Bal-kill
+ * lines. One kill completes adjacent bal + topaz splits together so the run
+ * never stalls a full respawn on the second of the pair.</li>
+ * <li>Place: counts "You placed the X Crystal!" lines plus the CRYSTAL
+ * PLACED (x/5) title counter; the 5th one ends the run.</li>
  * </ul>
  *
  * <p>Caveat: if Hypixel grants a crystal with no chat line at all, that
@@ -67,6 +70,24 @@ public final class SpeedrunManager {
 	private static int tickCounter = 0;
 	/** Crystal placements seen this run (5 ends it). */
 	private static int placeCount = 0;
+	/** Last CRYSTAL PLACED title counter (dup-proofing the title path). */
+	private static int placedTitleX = -1;
+
+	/**
+	 * Title-counter placement path: chimes exactly once per new count and
+	 * ends the run on 5/5. Chat lines remain as backup; state guards and
+	 * the counter make doubles impossible.
+	 */
+	public static void onPlacedTitle(Minecraft client, int x) {
+		if (x == placedTitleX) {
+			return;
+		}
+		placedTitleX = x;
+		ObjectiveSounds.onObjective(ObjectiveSounds.Trigger.PLACE);
+		if (x >= 5 && client != null) {
+			finishFromPlace(client);
+		}
+	}
 	/** 60s quiet -> -60s once + pause until input. */
 	private static final AfkWatch AFK = new AfkWatch(60_000L, 60_000L);
 
@@ -122,6 +143,7 @@ public final class SpeedrunManager {
 		finishedTotalMs = -1;
 		wasInBox = false;
 		placeCount = 0;
+		placedTitleX = -1;
 		AFK.reset();
 		PetAlert.resetLobby();
 	}
@@ -135,6 +157,7 @@ public final class SpeedrunManager {
 		splitIdx = 0;
 		finishedTotalMs = -1;
 		placeCount = 0;
+		placedTitleX = -1;
 		AFK.reset();
 		wasInBox = client.player != null && inBox(client.player.blockPosition());
 		MadoChat.chat(client, Component.literal("§b[MNU] §7Speedrun reset."));
@@ -199,7 +222,6 @@ public final class SpeedrunManager {
 		MadoChat.chat(client, Component.literal(
 			"§b[MNU] §7Split skipped: §f" + NucleusMod.SPEEDRUN.displayName(id)
 				+ " §7(" + splitIdx + "/" + runOrder.size() + ")"));
-		ObjectiveSounds.onSplit();
 		if (splitIdx >= runOrder.size()) {
 			finishRun(client);
 		}
@@ -209,6 +231,9 @@ public final class SpeedrunManager {
 		tickCounter++;
 		if (client.player == null || client.level == null) {
 			wasInBox = false;
+			return;
+		}
+		if (!NucleusMod.CONFIG.speedrunEnabled) {
 			return;
 		}
 		boolean inBox = inBox(client.player.blockPosition());
@@ -235,11 +260,6 @@ public final class SpeedrunManager {
 				} else if (afk.resumed) {
 					MadoChat.chat(client, Component.literal("§b[MNU] §aWelcome back — timer resumed."));
 				}
-				if (!AFK.isPaused() && tickCounter % 10 == 0 && "bal".equals(currentHead())) {
-					if (inBalArea(client)) {
-						completeHead(client, false);
-					}
-				}
 			}
 			case FINISHED -> {
 				if (tickCounter % 5 == 0) {
@@ -259,11 +279,10 @@ public final class SpeedrunManager {
 			return;
 		}
 		String norm = HollowsDetector.stripFormatting(raw).toLowerCase();
-		// Crystal placements count even outside a run (pet alert uses them).
+		// Crystal placements count even outside a run (5 ends a run).
+		// Silent here — the CRYSTAL PLACED (x/5) title owns the sound.
 		if (!ChatLines.isPlayerChat(norm) && norm.contains("you placed the") && norm.contains("crystal")) {
 			placeCount++;
-			PetAlert.onCrystalPlaced();
-			ObjectiveSounds.onObjective(ObjectiveSounds.Trigger.PLACE);
 		}
 		if (state != State.RUNNING || splitIdx >= runOrder.size()) {
 			return;
@@ -278,6 +297,7 @@ public final class SpeedrunManager {
 			finishFromPlace(client);
 			return;
 		}
+		boolean balKill = norm.contains("looks weak and tired") || norm.contains("retreats into the lava");
 		String head = runOrder.get(splitIdx);
 		boolean hit = switch (head) {
 			case "yolkar" -> ChatLines.isNpc(norm) && norm.contains("yolkar")
@@ -285,8 +305,8 @@ public final class SpeedrunManager {
 			case "tool" -> norm.contains("you have returned the scavenged");
 			case "amber", "sapphire", "jade", "amethyst" ->
 				!norm.contains("[npc]") && norm.contains(head + " crystal");
-			case "topaz" -> (!norm.contains("[npc]") && norm.contains("topaz crystal"))
-				|| norm.contains("looks weak and tired") || norm.contains("retreats into the lava");
+			case "bal" -> balKill;
+			case "topaz" -> (!norm.contains("[npc]") && norm.contains("topaz crystal")) || balKill;
 			case "place" -> {
 				if (norm.contains("you placed the") && norm.contains("crystal")) {
 					MadoChat.chat(client, Component.literal("§b[MNU] §7Crystals placed: §e"
@@ -294,10 +314,19 @@ public final class SpeedrunManager {
 				}
 				yield false;
 			}
-			default -> false; // "bal" is zone-based, handled in tick
+			default -> false;
 		};
 		if (hit) {
 			completeHead(client, false);
+			// One Bal kill satisfies adjacent bal + topaz splits together so
+			// the run never stalls a full respawn on the second of the pair.
+			if (balKill && splitIdx < runOrder.size()) {
+				String next = runOrder.get(splitIdx);
+				if ((head.equals("bal") && next.equals("topaz"))
+					|| (head.equals("topaz") && next.equals("bal"))) {
+					completeHead(client, false);
+				}
+			}
 		}
 	}
 
@@ -307,6 +336,7 @@ public final class SpeedrunManager {
 		segmentTimes.clear();
 		splitIdx = 0;
 		placeCount = 0;
+		placedTitleX = -1;
 		AFK.reset();
 		runStartMs = System.currentTimeMillis();
 		finishedTotalMs = -1;
@@ -327,7 +357,6 @@ public final class SpeedrunManager {
 			"§b[MNU] §7Split §f" + NucleusMod.SPEEDRUN.displayName(id)
 				+ " §7– " + SpeedrunStore.fmt(elapsed)
 				+ " §8(" + splitIdx + "/" + runOrder.size() + ")"));
-		ObjectiveSounds.onSplit();
 		// The run ends with the final split (5th crystal placed) — no box
 		// return needed.
 		if (splitIdx >= runOrder.size()) {
@@ -347,6 +376,9 @@ public final class SpeedrunManager {
 	 * lists stay aligned, then the run finishes as usual.
 	 */
 	private static void finishFromPlace(Minecraft client) {
+		if (state != State.RUNNING) {
+			return;
+		}
 		while (splitIdx < runOrder.size()) {
 			long elapsed = elapsedMs();
 			splitTimes.add(elapsed);
@@ -354,9 +386,6 @@ public final class SpeedrunManager {
 			splitIdx++;
 		}
 		NucleusMod.LOGGER.info("Speedrun finished on 5th crystal placement");
-		// The locked "place all crystals" split just completed: chime once
-		// in split mode (debounced against the per-placement All-mode chime).
-		ObjectiveSounds.onSplit();
 		finishRun(client);
 	}
 
@@ -378,24 +407,4 @@ public final class SpeedrunManager {
 			&& pos.getZ() >= BOX_MIN_Z && pos.getZ() <= BOX_MAX_Z;
 	}
 
-	private static boolean inBalArea(Minecraft client) {
-		for (String line : HollowsDetector.sidebarLines(client)) {
-			// Khazad-dûm only: Magma Fields is far bigger and false-fires.
-			if (line.contains("khazad")) {
-				return true;
-			}
-		}
-		// Split-field hazard: the location can straddle prefix/suffix.
-		if (client.level != null) {
-			try {
-				for (String line : HollowsDetector.combinedTeamLines(client.level.getScoreboard())) {
-					if (line.contains("khazad")) {
-						return true;
-					}
-				}
-			} catch (Exception ignored) {
-			}
-		}
-		return false;
-	}
 }

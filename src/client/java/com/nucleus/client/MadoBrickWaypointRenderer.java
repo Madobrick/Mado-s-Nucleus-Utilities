@@ -53,7 +53,8 @@ public final class MadoBrickWaypointRenderer {
 		}
 
 		Vec3 eye = client.player.getEyePosition();
-		var waypoints = MadoBrickWaypoints.snapshot();
+		var temple = MadoBrickWaypoints.snapshot();
+		var waypoints = new java.util.ArrayList<>(temple);
 		waypoints.addAll(MadoBrickWaypoints.customSnapshot());
 
 		for (var wp : waypoints) {
@@ -82,6 +83,32 @@ public final class MadoBrickWaypointRenderer {
 				// Gizmos are only valid during level rendering; never crash the frame.
 				NucleusMod.LOGGER.debug("Waypoint gizmo failed: {}", e.getMessage());
 				return;
+			}
+		}
+
+		// Jungle-only polylines WP1 -> WP2 -> WP3 (never custom waypoints).
+		if (NucleusMod.CONFIG.templeLinkLines) {
+			try {
+				var ordered = new java.util.ArrayList<MadoBrickWaypoints.Waypoint>();
+				for (var wp : temple) {
+					if (wp.index() >= 0 && wp.index() <= 2
+						&& MadoBrickWaypoints.visibleFor(wp.index())) {
+						ordered.add(wp);
+					}
+				}
+				ordered.sort(java.util.Comparator.comparingInt(MadoBrickWaypoints.Waypoint::index));
+				for (int i = 0; i + 1 < ordered.size(); i++) {
+					var a = ordered.get(i);
+					var b = ordered.get(i + 1);
+					int color = MadoBrickWaypoints.colorFor(a.index());
+					var lineProps = Gizmos.line(
+						Vec3.atCenterOf(a.pos()), Vec3.atCenterOf(b.pos()), color);
+					if (throughWalls) {
+						lineProps.setAlwaysOnTop();
+					}
+				}
+			} catch (Exception e) {
+				NucleusMod.LOGGER.debug("Waypoint link gizmo failed: {}", e.getMessage());
 			}
 		}
 	}

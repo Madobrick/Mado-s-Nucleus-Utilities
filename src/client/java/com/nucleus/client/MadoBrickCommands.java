@@ -31,7 +31,9 @@ public final class MadoBrickCommands {
 					.then(ClientCommands.literal("last").executes(MadoBrickCommands::deleteLast))
 					.then(ClientCommands.literal("all").executes(MadoBrickCommands::deleteAll)))
 				.then(ClientCommands.literal("debug").executes(MadoBrickCommands::debug))
-				.then(ClientCommands.literal("notabwarn").executes(MadoBrickCommands::noTabWarn)));
+				.then(ClientCommands.literal("notabwarn").executes(MadoBrickCommands::noTabWarn))
+				.then(ClientCommands.literal("safe").executes(MadoBrickCommands::safe))
+				.then(ClientCommands.literal("dye").executes(MadoBrickCommands::dye)));
 		});
 	}
 
@@ -92,8 +94,7 @@ public final class MadoBrickCommands {
 		out.add("§7Jackpot: " + (JackpotAnimation.isActive()
 			? "§aactive §7(" + JackpotAnimation.type().displayName + ")" : "§8idle"));
 		out.add("§7Pet widget: " + (PetAlert.widgetFound() ? "§afound" : "§cnot found")
-			+ " §7| pet: §f" + (PetAlert.currentPet() == null ? "-" : PetAlert.currentPet())
-			+ " §7| placed: §e" + PetAlert.placedLobby());
+			+ " §7| pet: §f" + (PetAlert.currentPet() == null ? "-" : PetAlert.currentPet()));
 		out.add("§7Scavenger held: §f" + Scavenger.heldTools()
 			+ " §7| rate: §f" + String.format("%.1f", Scavenger.toolsPerHour()) + "/h"
 			+ " §7| sets: §e" + Scavenger.setsCompleted());
@@ -120,6 +121,32 @@ public final class MadoBrickCommands {
 		NucleusMod.CONFIG.save();
 		MadoChat.feedback(ctx.getSource(),
 			Component.literal("§b[MNU] §7the annoying /tab message will no longer bother you :c"));
+		return 1;
+	}
+
+	private static int safe(CommandContext<FabricClientCommandSource> ctx) {
+		boolean next = !NucleusMod.CONFIG.safeMode;
+		NucleusMod.CONFIG.safeMode = next;
+		NucleusMod.CONFIG.save();
+		MadoChat.feedback(ctx.getSource(), Component.literal(
+			"§b[MNU] §7Safe mode: " + (next ? "§aON §7(only /warp nucleus|cn)" : "§cOFF")));
+		return 1;
+	}
+
+	/** Preview of the fake Tool Dye celebration (chat + animation + sound, no unlock). */
+	private static int dye(CommandContext<FabricClientCommandSource> ctx) {
+		Minecraft client = Minecraft.getInstance();
+		if (client == null || client.player == null) {
+			MadoChat.err(ctx.getSource(), Component.literal("No player."));
+			return 0;
+		}
+		String name;
+		try {
+			name = client.player.getScoreboardName();
+		} catch (Exception ignored) {
+			name = "Player";
+		}
+		DyeCelebration.preview(client, name);
 		return 1;
 	}
 

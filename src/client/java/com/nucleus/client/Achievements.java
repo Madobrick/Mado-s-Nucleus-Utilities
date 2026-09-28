@@ -6,8 +6,6 @@ import java.util.List;
 import java.util.Map;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.inventory.ContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.item.ItemStack;
@@ -49,7 +47,7 @@ public final class Achievements {
 		"jade", "Jade Dye");
 
 	public static final FunDef[] FUN = {
-		new FunDef("dopamine", "Tool dye?", "1/10k chance to get when you open a treasure chest"),
+		new FunDef("dopamine", "Tool dye?", "1/25k chance on finding Divan treasure"),
 		new FunDef("slow", "Slow and steady", "Finish a crystal run slower than 1 hour"),
 		new FunDef("why", "Why", "Give King Yolkar a Blue Goblin Egg"),
 		new FunDef("terraria", "Is that a terraria reference?", "Obtain a Recall Potion"),
@@ -73,7 +71,6 @@ public final class Achievements {
 	private static long witnessCandidateAt = 0L;
 	private static int tickCount = 0;
 	private static Map<String, Integer> lastEggCounts = new HashMap<>();
-	private static Screen lastScreen = null;
 	/** Last time Yolkar's success dialogue was seen (blue-egg fix). */
 	private static long lastYolkarAt = 0L;
 
@@ -374,16 +371,6 @@ public final class Achievements {
 			checkLobbyPlayers(client);
 		}
 
-		// Dopamine roll: fresh treasure-chest screen in Mines of Divan.
-		Screen cur = client.screen;
-		if (cur != lastScreen) {
-			lastScreen = cur;
-			if (cur instanceof ContainerScreen && inMinesOfDivan(client)) {
-				if (Math.random() < 0.0001) {
-					unlockFun("dopamine");
-				}
-			}
-		}
 	}
 
 	/** Same-lobby player achievements (Cosmixi / Madobrick). */
@@ -450,9 +437,5 @@ public final class Achievements {
 		} catch (Exception ignored) {
 		}
 		return out;
-	}
-
-	private static boolean inMinesOfDivan(Minecraft client) {
-		return HollowsDetector.inMinesOfDivan(client);
 	}
 }

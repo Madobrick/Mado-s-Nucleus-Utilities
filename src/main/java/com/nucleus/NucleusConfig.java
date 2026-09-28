@@ -25,6 +25,8 @@ public class NucleusConfig {
 	public boolean templeAutoPlace = true;
 	public boolean waypointsThroughWalls = true;
 	public boolean waypointText = false;
+	/** Link lines WP1 -> WP2 -> WP3 (jungle temple waypoints only). */
+	public boolean templeLinkLines = false;
 	public boolean showWaypoint1 = true;
 	public boolean showWaypoint2 = true;
 	public boolean showWaypoint3 = true;
@@ -100,6 +102,12 @@ public class NucleusConfig {
 	/** When true the mod sends no chat messages at all. */
 	public boolean quietChat = false;
 
+	/** Master switch for the crystal-run speedrun timer. */
+	public boolean speedrunEnabled = true;
+
+	/** SAFE MODE: blocks every /warp except /warp nucleus|cn. */
+	public boolean safeMode = false;
+
 	/** Warns when the tab Info widget can't be found (dismissable in chat). */
 	public boolean tabWarnEnabled = true;
 
@@ -119,6 +127,7 @@ public class NucleusConfig {
 		templeAutoPlace = true;
 		waypointsThroughWalls = true;
 		waypointText = false;
+		templeLinkLines = false;
 		showWaypoint1 = true;
 		showWaypoint2 = true;
 		showWaypoint3 = true;
@@ -158,6 +167,8 @@ public class NucleusConfig {
 		jackpotSpeed = 1.0f;
 		timerBg = 50;
 		quietChat = false;
+		speedrunEnabled = true;
+		safeMode = false;
 		tabWarnEnabled = true;
 		soundYolkar = true;
 		soundCrystal = true;
@@ -181,6 +192,7 @@ public class NucleusConfig {
 				templeAutoPlace = loaded.templeAutoPlace;
 				waypointsThroughWalls = loaded.waypointsThroughWalls;
 				waypointText = loaded.waypointText;
+				templeLinkLines = loaded.templeLinkLines;
 				showWaypoint1 = loaded.showWaypoint1;
 				showWaypoint2 = loaded.showWaypoint2;
 				showWaypoint3 = loaded.showWaypoint3;
@@ -250,6 +262,8 @@ public class NucleusConfig {
 					timerBg = loaded.timerBg;
 				}
 				quietChat = loaded.quietChat;
+			speedrunEnabled = loaded.speedrunEnabled;
+			safeMode = loaded.safeMode;
 			tabWarnEnabled = loaded.tabWarnEnabled;
 			soundYolkar = loaded.soundYolkar;
 			soundCrystal = loaded.soundCrystal;

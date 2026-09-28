@@ -9,37 +9,34 @@ import net.minecraft.client.Minecraft;
 import com.nucleus.NucleusMod;
 
 /**
- * Wrong-pet alert: once all 5 crystals are placed in a lobby, warns while
- * standing in the Crystal Nucleus with anything but the Mole equipped
- * (pet read from Hypixel's Pet tab widget).
+ * Wrong-pet alert: warns while standing in the Crystal Nucleus for 2.5s+
+ * with anything but the Mole equipped (pet read from Hypixel's Pet tab
+ * widget), once all 5 crystals are picked up. Placements never count
+ * toward that — only actual pickups.
  */
 public final class PetAlert {
 	private PetAlert() {
 	}
 
-	private static int placedLobby = 0;
 	private static boolean warnedWidget = false;
 	private static long lastAlertChatAt = 0L;
 	private static int tickCounter = 0;
 	private static boolean widgetFound = false;
 	private static String cachedPet = null;
 	private static List<String> lastWidgetLines = new ArrayList<>();
-
-	public static void onCrystalPlaced() {
-		placedLobby++;
-	}
+	/** Entry grace: the tab widget lags behind the player by seconds. */
+	private static final long NUCLEUS_GRACE_MS = 2500L;
+	private static long nucleusEnterAt = 0L;
+	private static boolean wasInNucleus = false;
 
 	public static void resetLobby() {
-		placedLobby = 0;
 		warnedWidget = false;
 		lastAlertChatAt = 0L;
 		widgetFound = false;
 		cachedPet = null;
 		lastWidgetLines = new ArrayList<>();
-	}
-
-	public static int placedLobby() {
-		return placedLobby;
+		nucleusEnterAt = 0L;
+		wasInNucleus = false;
 	}
 
 	/** Raw widget lines after the Pet header (for /mado pet debug). */
@@ -55,7 +52,7 @@ public final class PetAlert {
 		return cachedPet;
 	}
 
-	/** True when the on-screen wrong-pet warning should show: all 5 picked up, standing in the Nucleus, no Mole. */
+	/** True when the on-screen wrong-pet warning should show: all 5 picked up, in the Nucleus 2.5s+, no Mole. */
 	public static boolean alertActive() {
 		if (!NucleusMod.CONFIG.petAlertEnabled || !widgetFound) {
 			return false;
@@ -70,10 +67,14 @@ public final class PetAlert {
 			return false;
 		}
 		try {
-			return HollowsDetector.inCrystalNucleus(Minecraft.getInstance());
+			if (!HollowsDetector.inCrystalNucleus(Minecraft.getInstance())) {
+				return false;
+			}
 		} catch (Exception ignored) {
 			return false;
 		}
+		// Tab widget lags the player: no verdict until 2.5s after entry.
+		return System.currentTimeMillis() - nucleusEnterAt >= NUCLEUS_GRACE_MS;
 	}
 
 	public static void tick(Minecraft client) {
@@ -84,6 +85,15 @@ public final class PetAlert {
 		if (!NucleusMod.CONFIG.petAlertEnabled || client == null || client.player == null) {
 			return;
 		}
+		boolean inNuc = false;
+		try {
+			inNuc = HollowsDetector.inCrystalNucleus(client);
+		} catch (Exception ignored) {
+		}
+		if (inNuc && !wasInNucleus) {
+			nucleusEnterAt = System.currentTimeMillis();
+		}
+		wasInNucleus = inNuc;
 		if (!HollowsDetector.isInCrystalHollows()) {
 			return;
 		}

@@ -75,6 +75,138 @@ public final class SystemAudio {
 		return play(loc, volume01, pitch);
 	}
 
+	/**
+	 * Raw bundled audio file (e.g. the dye.mp3 sting): no sound-event lookup,
+	 * decoded by extension (.ogg via JOrbis, .mp3 via JLayer), then played
+	 * like everything else in here.
+	 */
+	public static boolean playFile(Identifier fileId, float volume01, float pitch) {
+		if (volume01 <= 0.001f) {
+			return true;
+		}
+		Minecraft client = Minecraft.getInstance();
+		if (client == null || client.getResourceManager() == null) {
+			return false;
+		}
+		try {
+			CachedSound cached;
+			synchronized (CACHE) {
+				cached = CACHE.get(fileId.toString());
+			}
+			if (cached == null) {
+				cached = fileId.toString().toLowerCase(java.util.Locale.ROOT).endsWith(".mp3")
+					? decodeMp3(client, fileId)
+					: decodeOggFile(client, fileId);
+				if (cached == null) {
+					return false;
+				}
+				synchronized (CACHE) {
+					if (CACHE.size() >= MAX_CACHE) {
+						CACHE.clear();
+					}
+					CACHE.put(fileId.toString(), cached);
+				}
+			}
+			final CachedSound sound = cached;
+			final float vol = volume01;
+			final float pit = pitch <= 0f ? 1.0f : pitch;
+			Thread thread = new Thread(() -> playPcm(sound, vol, pit), "nucleus-system-sound");
+			thread.setDaemon(true);
+			thread.start();
+			return true;
+		} catch (Exception e) {
+			failOnce(fileId, "playFile threw: " + e);
+			return false;
+		}
+	}
+
+	/** Plain .ogg asset decode (shared by the event path below). */
+	private static CachedSound decodeOggFile(Minecraft client, Identifier file) {
+		var resource = client.getResourceManager().getResource(file).orElse(null);
+		if (resource == null) {
+			failOnce(file, "missing resource");
+			return null;
+		}
+		try (InputStream in = resource.open();
+			JOrbisAudioStream ogg = new JOrbisAudioStream(in)) {
+			AudioFormat format = ogg.getFormat();
+			ByteBuffer pcm = ogg.readAll();
+			byte[] bytes = new byte[pcm.remaining()];
+			pcm.get(bytes);
+			double prePeak = peakFraction(bytes, format);
+			byte[] norm = normalizePcm(bytes, format);
+			synchronized (LOGGED) {
+				if (LOGGED.add(file.toString())) {
+					NucleusMod.LOGGER.info(
+						"SystemAudio decoded {}: {} {}bit {}ch {}Hz, {} bytes, pre-norm peak {}%",
+						file, format.getEncoding(), format.getSampleSizeInBits(),
+						format.getChannels(), (int) format.getSampleRate(),
+						bytes.length, Math.round(prePeak * 100));
+				}
+			}
+			return new CachedSound(norm, format);
+		} catch (Exception e) {
+			failOnce(file, "ogg decode threw: " + e);
+			return null;
+		}
+	}
+
+	/** MP3 asset decode via the bundled JLayer decoder. */
+	private static CachedSound decodeMp3(Minecraft client, Identifier file) {
+		var resource = client.getResourceManager().getResource(file).orElse(null);
+		if (resource == null) {
+			failOnce(file, "missing resource");
+			return null;
+		}
+		try (InputStream in = resource.open()) {
+			javazoom.jl.decoder.Bitstream bitstream = new javazoom.jl.decoder.Bitstream(in);
+			javazoom.jl.decoder.Decoder decoder = new javazoom.jl.decoder.Decoder();
+			java.io.ByteArrayOutputStream pcm = new java.io.ByteArrayOutputStream();
+			int rate = 0;
+			int channels = 0;
+			boolean first = true;
+			while (true) {
+				javazoom.jl.decoder.Header header = bitstream.readFrame();
+				if (header == null) {
+					break;
+				}
+				javazoom.jl.decoder.SampleBuffer out =
+					(javazoom.jl.decoder.SampleBuffer) decoder.decodeFrame(header, bitstream);
+				if (first) {
+					rate = decoder.getOutputFrequency();
+					channels = decoder.getOutputChannels();
+					first = false;
+				}
+				short[] s = out.getBuffer();
+				int len = out.getBufferLength();
+				java.nio.ByteBuffer bb = java.nio.ByteBuffer.allocate(len * 2)
+					.order(java.nio.ByteOrder.LITTLE_ENDIAN);
+				bb.asShortBuffer().put(s, 0, len);
+				pcm.write(bb.array(), 0, len * 2);
+				bitstream.closeFrame();
+			}
+			if (first) {
+				failOnce(file, "no audio frames");
+				return null;
+			}
+			AudioFormat format = new AudioFormat(rate, 16, channels, true, false);
+			byte[] bytes = pcm.toByteArray();
+			double prePeak = peakFraction(bytes, format);
+			byte[] norm = normalizePcm(bytes, format);
+			synchronized (LOGGED) {
+				if (LOGGED.add(file.toString())) {
+					NucleusMod.LOGGER.info(
+						"SystemAudio decoded {}: mp3 {}Hz {}ch, {} bytes, pre-norm peak {}%",
+						file, rate, channels, bytes.length, Math.round(prePeak * 100));
+				}
+			}
+			return new CachedSound(norm, format);
+		} catch (Exception e) {
+			failOnce(file, "mp3 decode threw: " + e);
+			return null;
+		}
+	}
+
 	public static boolean play(Identifier eventId, float volume01, float pitch) {
 		if (volume01 <= 0.001f) {
 			return true;

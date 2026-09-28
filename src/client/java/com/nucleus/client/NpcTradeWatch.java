@@ -12,36 +12,34 @@ import com.nucleus.client.ObjectiveSounds.Trigger;
 /**
  * Handover failsafe for NPC trades whose chat lines don't always show.
  *
- * <p>Two signals combine: right-clicking a watched NPC records a touch, and
- * a 1s inventory sweep watches quest items leave. Lenient items (soulbound
- * quest goods with no other sink) chime on any decrease; strict ones
- * (tradable apparatus + robot parts) need a recent robot touch, and part
- * decreases are ignored when an apparatus was crafted in the same tick.
+ * <p>Right- or left-clicking a watched NPC records a touch, and inventory
+ * packets plus a fast sweep watch quest items leave. NOTHING here fires on
+ * a bare decrease: every item needs a fresh touch, because handovers always
+ * start with a click while drops, stash moves and void throws never do.
+ * Part decreases are ignored when an apparatus was crafted in the same tick.
  */
 public final class NpcTradeWatch {
 	private NpcTradeWatch() {
 	}
 
-	private record ItemWatch(String match, Trigger trigger, boolean lenient, boolean part, boolean chatOnly) {
+	private record ItemWatch(String match, Trigger trigger, boolean part, boolean chatOnly) {
 	}
 
 	private static final ItemWatch[] ITEMS = {
 		// Apparatus is chat-only (Robot's compon line): the diff would
 		// double-chime the same handover. Still counted so part
 		// decreases from crafting it stay silent below.
-		new ItemWatch("precursor apparatus", Trigger.APPARATUS, false, false, true),
-		new ItemWatch("control switch", Trigger.APPARATUS, false, true, false),
-		new ItemWatch("electron transmitter", Trigger.APPARATUS, false, true, false),
-		new ItemWatch("ftx 3070", Trigger.APPARATUS, false, true, false),
-		new ItemWatch("robotron reflector", Trigger.APPARATUS, false, true, false),
-		new ItemWatch("superlite motor", Trigger.APPARATUS, false, true, false),
-		new ItemWatch("synthetic heart", Trigger.APPARATUS, false, true, false),
-		new ItemWatch("scavenged lapis sword", Trigger.TOOL, true, false, false),
-		new ItemWatch("scavenged golden hammer", Trigger.TOOL, true, false, false),
-		new ItemWatch("scavenged diamond axe", Trigger.TOOL, true, false, false),
-		new ItemWatch("scavenged emerald hammer", Trigger.TOOL, true, false, false),
-		new ItemWatch("jungle key", Trigger.KEY, true, false, false),
-		new ItemWatch("goblin egg", Trigger.YOLKAR, true, false, false)
+		new ItemWatch("precursor apparatus", Trigger.APPARATUS, false, true),
+		new ItemWatch("control switch", Trigger.APPARATUS, true, false),
+		new ItemWatch("electron transmitter", Trigger.APPARATUS, true, false),
+		new ItemWatch("ftx 3070", Trigger.APPARATUS, true, false),
+		new ItemWatch("robotron reflector", Trigger.APPARATUS, true, false),
+		new ItemWatch("superlite motor", Trigger.APPARATUS, true, false),
+		new ItemWatch("synthetic heart", Trigger.APPARATUS, true, false),
+		new ItemWatch("scavenged lapis sword", Trigger.TOOL, false, false),
+		new ItemWatch("scavenged golden hammer", Trigger.TOOL, false, false),
+		new ItemWatch("scavenged diamond axe", Trigger.TOOL, false, false),
+		new ItemWatch("scavenged emerald hammer", Trigger.TOOL, false, false)
 	};
 
 	/** Recent right-clicks count as handover context for 30s. */
@@ -50,12 +48,14 @@ public final class NpcTradeWatch {
 	private static final Map<Trigger, Long> LAST_TOUCH = new HashMap<>();
 	private static final Map<String, Integer> LAST_COUNTS = new HashMap<>();
 	private static boolean seeded = false;
+	private static boolean containerWasOpen = false;
 	private static int tickCounter = 0;
 
 	public static void reset() {
 		LAST_TOUCH.clear();
 		LAST_COUNTS.clear();
 		seeded = false;
+		containerWasOpen = false;
 	}
 
 	/** Any Professor Robot dialogue proves robot context (chat hook). */
@@ -187,6 +187,28 @@ public final class NpcTradeWatch {
 		} catch (Exception ignored) {
 			return;
 		}
+		// Storage shuffle guard: anything moved into backpacks, chests or
+		// loot claimed while a container is open must never chime. Hold
+		// fire (and the baseline) while open, then re-seed silently once —
+		// handovers happen via entity clicks, never inside container GUIs
+		// (chat covers those regardless).
+		boolean containerOpen;
+		try {
+			containerOpen = client.screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+		} catch (Exception ignored) {
+			containerOpen = false;
+		}
+		if (containerOpen) {
+			containerWasOpen = true;
+			return;
+		}
+		if (containerWasOpen || !seeded) {
+			containerWasOpen = false;
+			LAST_COUNTS.clear();
+			LAST_COUNTS.putAll(counts);
+			seeded = true;
+			return;
+		}
 		if (!seeded) {
 			LAST_COUNTS.putAll(counts);
 			seeded = true;
@@ -195,61 +217,23 @@ public final class NpcTradeWatch {
 		// Crafting an apparatus eats 6 parts at once: never a delivery.
 		boolean apparatusUp = counts.getOrDefault("precursor apparatus", 0)
 			> LAST_COUNTS.getOrDefault("precursor apparatus", 0);
-		// Mid-drag the stack sits on the cursor (outside every inventory
-		// list), and GUIs move stacks around — both look like a decrease.
-		// Hold fire (and the baseline) until hands are empty and no GUI is
-		// open; a real handover is still gone then and chimes on close.
-		boolean busy = isBusy(client);
 		long now = System.currentTimeMillis();
 		for (ItemWatch item : ITEMS) {
 			int before = LAST_COUNTS.getOrDefault(item.match(), 0);
 			int after = counts.getOrDefault(item.match(), 0);
-			if (after >= before || busy || item.chatOnly()) {
+			if (after >= before) {
 				continue;
 			}
-			// Stash-shuffling far from the NPC must stay silent: lenient
-			// items need the right area (or a fresh touch), strict ones
-			// always need the touch.
+			// Touch-gated, no exceptions: drops, stash moves and void throws
+			// never start with an NPC click.
 			boolean touched = now - LAST_TOUCH.getOrDefault(item.trigger(), 0L) < TOUCH_WINDOW_MS;
-			if (item.lenient()) {
-				if (touched || rightPlace(client, item.trigger())) {
-					ObjectiveSounds.onObjective(item.trigger());
-				}
-			} else if (item.part() && apparatusUp) {
+			if (item.part() && apparatusUp) {
 				continue;
 			} else if (touched) {
 				ObjectiveSounds.onObjective(item.trigger());
 			}
 		}
-		if (!busy) {
-			LAST_COUNTS.clear();
-			LAST_COUNTS.putAll(counts);
-		}
-	}
-
-	/** True while dragging a stack or clicking inside any GUI. */
-	private static boolean isBusy(Minecraft client) {
-		try {
-			if (client.player != null && !client.player.containerMenu.getCarried().isEmpty()) {
-				return true;
-			}
-			return client.screen != null;
-		} catch (Exception ignored) {
-			return false;
-		}
-	}
-
-	/** Handovers only happen here; shuffling keys at the Nucleus stays silent. */
-	private static boolean rightPlace(Minecraft client, Trigger trigger) {
-		try {
-			return switch (trigger) {
-				case TOOL -> HollowsDetector.inMinesOfDivan(client);
-				case KEY -> HollowsDetector.isInJungleTemple(client);
-				case YOLKAR -> HollowsDetector.isInCrystalHollows();
-				default -> true;
-			};
-		} catch (Exception ignored) {
-			return true;
-		}
+		LAST_COUNTS.clear();
+		LAST_COUNTS.putAll(counts);
 	}
 }

@@ -239,6 +239,9 @@ public class SpeedrunStore {
 	}
 
 	public void setEnabled(String id, boolean value) {
+		if ("place".equals(id)) {
+			return;
+		}
 		enabled.put(id, value);
 		save();
 	}
@@ -256,12 +259,12 @@ public class SpeedrunStore {
 
 	/**
 	 * Full run snapshot: user-ordered splits plus the locked "place all
-	 * crystals" split at the end (position can never move; the start box
-	 * is implicit and fixed).
+	 * crystals" split at the end (always on — without it a run could never
+	 * finish; position can never move; the start box is implicit and fixed).
 	 */
 	public List<String> runSnapshot() {
 		List<String> out = enabledOrderedIds();
-		if (isEnabled("place") && !out.contains("place")) {
+		if (!out.contains("place")) {
 			out.add("place");
 		}
 		return out;

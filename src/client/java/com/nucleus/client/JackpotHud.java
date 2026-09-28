@@ -28,25 +28,12 @@ import com.nucleus.client.JackpotAnimation.Stage;
 public final class JackpotHud implements HudElement {
 	public static final JackpotHud INSTANCE = new JackpotHud();
 
-	private static final int ALLOY_FRAMES = 84;
-	private static final long ALLOY_FRAME_MS = 50L;
-	private static final Identifier CLAW_ID = NucleusMod.id("textures/jackpot/quick_claw.png");
-	private static final Identifier JADE_ID = NucleusMod.id("textures/jackpot/jade_dye.png");
 	private static final Identifier WHEEL_ID = NucleusMod.id("textures/jackpot/wheel.png");
 	private static final Identifier DOT_ID = NucleusMod.id("textures/jackpot/dot.png");
-	private static final Identifier[] ALLOY_IDS = buildAlloyIds();
 
 	private static final Map<Identifier, Boolean> TEXTURE_PRESENT = new HashMap<>();
 
 	private JackpotHud() {
-	}
-
-	private static Identifier[] buildAlloyIds() {
-		Identifier[] ids = new Identifier[ALLOY_FRAMES];
-		for (int i = 0; i < ALLOY_FRAMES; i++) {
-			ids[i] = NucleusMod.id("textures/jackpot/divans_alloy_" + i + ".png");
-		}
-		return ids;
 	}
 
 	private static boolean hasTexture(Identifier id) {
@@ -120,17 +107,8 @@ public final class JackpotHud implements HudElement {
 			gfx.fill(0, 0, w, h, (flashA << 24) | 0x00FFFFFF);
 		}
 
-		// Backdrop.
-		if (type.intense) {
-		 double pulse = 0.5 + 0.5 * Math.sin(now / (type.mega ? 70.0 : 90.0));
-			int base = type.mega ? 34 : 20;
-			int amp = type.mega ? 36 : 16;
-			int flash = (int) ((base + amp * pulse) * fade);
-			gfx.fill(0, 0, w, h, (flash << 24) | 0x00FFD700);
-			gfx.fill(0, 0, w, h, (int) (0x50 * fade) << 24);
-		} else {
-			gfx.fill(0, 0, w, h, (int) (0x70 * fade) << 24);
-		}
+		// No dim after the flash: the wheel phase keeps its backdrop, the
+		// win phase plays bright over the world.
 
 		drawCoins(gfx, textAlpha);
 
@@ -155,15 +133,15 @@ public final class JackpotHud implements HudElement {
 		scaledText(gfx, client.font, winText, cx, winY, winScale, winColor);
 		gfx.fill(cx - winW / 2 - 8, winY + (int) (26 * u), cx + winW / 2 + 8, winY + (int) (29 * u), withAlpha(0xFFFFD700, textAlpha));
 
-		// Item icon (full texture scaled) + name.
-		int iconSize = (int) (96 * u);
+		// Item name + tag where the icon sat. The Totem-style 3D pop owns
+		// that zone now — no HUD icon is drawn over it.
 		int iconY = (int) (h * 0.40);
-		drawItem(gfx, type, cx - iconSize / 2, iconY, iconSize, textAlpha);
-		scaledText(gfx, client.font, type.displayName, cx, iconY + iconSize + 6, 1.5f * u,
+		int nameY = iconY + (int) (96 * u) + 6;
+		scaledText(gfx, client.font, type.displayName, cx, nameY, 1.5f * u,
 			withAlpha(type.color, textAlpha));
 		String tag = type.mega ? "MEGA JACKPOT!" : type.intense ? "JACKPOT!" : "Nice!";
 		gfx.centeredText(client.font, tag,
-			cx, iconY + iconSize + 6 + (int) (22 * u), withAlpha(0xFFFFFFFF, textAlpha));
+			cx, nameY + (int) (22 * u), withAlpha(0xFFFFFFFF, textAlpha));
 	}
 
 	private static void drawCoins(GuiGraphicsExtractor gfx, int alpha) {
@@ -414,113 +392,4 @@ public final class JackpotHud implements HudElement {
 		}
 	}
 
-	private static void drawItem(GuiGraphicsExtractor gfx, DropType type, int x, int y, int size, int alpha) {
-		long elapsed = JackpotAnimation.elapsedMillis();
-		// Zoom choreography: 0% -> easeOutBack overshoot (the bounce) ->
-		// hold -> smooth zoom out to 0% as it fades. No drifting/rotation.
-		float p = JackpotAnimation.progress();
-		float zoom;
-		if (p < 0.18f) {
-			float t = p / 0.18f;
-			float u = t - 1f;
-			zoom = 1f + 2.70158f * u * u * u + 1.70158f * u * u;
-			if (zoom < 0f) {
-				zoom = 0f;
-			}
-		} else if (p > 0.80f) {
-			float q = (p - 0.80f) / 0.20f;
-			zoom = Math.max(0f, 1f - q * q);
-		} else {
-			zoom = 1f;
-		}
-		if (zoom <= 0.01f) {
-			return;
-		}
-		float half = size / 2f;
-		float cx = x + half;
-		float cy = y + half;
-		int tint = (alpha << 24) | 0x00FFFFFF;
-
-		var pose = gfx.pose();
-		pose.pushMatrix();
-		pose.translate(cx, cy);
-		pose.scale(zoom, zoom);
-		pose.translate(-half, -half);
-		boolean drew = false;
-		try {
-			switch (type) {
-				case DIVANS_ALLOY -> {
-					int frame = (int) ((elapsed / ALLOY_FRAME_MS) % ALLOY_FRAMES);
-					Identifier id = ALLOY_IDS[frame];
-					if (hasTexture(id)) {
-						gfx.blit(RenderPipelines.GUI_TEXTURED, id, 0, 0, 0.0f, 0.0f, size, size, 64, 64, 64, 64, tint);
-						drew = true;
-					}
-				}
-				case QUICK_CLAW -> {
-					if (hasTexture(CLAW_ID)) {
-						gfx.blit(RenderPipelines.GUI_TEXTURED, CLAW_ID, 0, 0, 0.0f, 0.0f, size, size, 300, 300, 300, 300, tint);
-						drew = true;
-					}
-				}
-				case JADE_DYE -> {
-					if (hasTexture(JADE_ID)) {
-						gfx.blit(RenderPipelines.GUI_TEXTURED, JADE_ID, 0, 0, 0.0f, 0.0f, size, size, 210, 220, 210, 220, tint);
-						drew = true;
-					}
-				}
-			}
-		} catch (Exception ignored) {
-			drew = false;
-		} finally {
-			pose.popMatrix();
-		}
-		if (drew) {
-			return;
-		}
-		// Procedural fallback (48px art, same zoom envelope about the center).
-		pose.pushMatrix();
-		pose.translate(cx, cy);
-		float fb = size / 48f * zoom;
-		pose.scale(fb, fb);
-		pose.translate(-24f, -24f);
-		try {
-			drawIcon(gfx, type, 0, 0, alpha);
-		} finally {
-			pose.popMatrix();
-		}
-	}
-
-	private static void drawIcon(GuiGraphicsExtractor gfx, DropType type, int ox, int oy, int alpha) {
-		switch (type) {
-			case DIVANS_ALLOY -> {
-				// Golden ingot cluster.
-				gfx.fill(ox + 4, oy + 28, ox + 44, oy + 42, withAlpha(0xFFB8860B, alpha));
-				gfx.fill(ox + 8, oy + 16, ox + 40, oy + 28, withAlpha(0xFFFFD700, alpha));
-				gfx.fill(ox + 14, oy + 8, ox + 34, oy + 16, withAlpha(0xFFFFE36E, alpha));
-				gfx.fill(ox + 16, oy + 10, ox + 22, oy + 14, withAlpha(0xFFFFFFFF, alpha));
-				gfx.fill(ox + 6, oy + 4, ox + 8, oy + 6, withAlpha(0xFFFFFFFF, alpha));
-				gfx.fill(ox + 38, oy + 20, ox + 40, oy + 22, withAlpha(0xFFFFFFFF, alpha));
-			}
-			case QUICK_CLAW -> {
-				// Pale cube, black stripes, purple core.
-				gfx.fill(ox + 6, oy + 6, ox + 42, oy + 42, withAlpha(0xFFF2F2F2, alpha));
-				gfx.fill(ox + 36, oy + 6, ox + 42, oy + 42, withAlpha(0xFFCFCFCF, alpha));
-				gfx.fill(ox + 6, oy + 36, ox + 42, oy + 42, withAlpha(0xFFD8D8D8, alpha));
-				gfx.fill(ox + 12, oy + 6, ox + 18, oy + 26, withAlpha(0xFF111111, alpha));
-				gfx.fill(ox + 24, oy + 6, ox + 30, oy + 30, withAlpha(0xFF111111, alpha));
-				gfx.fill(ox + 18, oy + 24, ox + 34, oy + 40, withAlpha(0xFF7B2FBE, alpha));
-				gfx.fill(ox + 21, oy + 27, ox + 28, oy + 34, withAlpha(0xFFA855F7, alpha));
-			}
-			case JADE_DYE -> {
-				// Green cube with black/gold cap.
-				gfx.fill(ox + 6, oy + 10, ox + 42, oy + 44, withAlpha(0xFF0E7A3D, alpha));
-				gfx.fill(ox + 6, oy + 36, ox + 42, oy + 44, withAlpha(0xFF0A5C2E, alpha));
-				gfx.fill(ox + 10, oy + 14, ox + 14, oy + 30, withAlpha(0xFF2FBF71, alpha));
-				gfx.fill(ox + 6, oy + 4, ox + 42, oy + 12, withAlpha(0xFF111111, alpha));
-				gfx.fill(ox + 10, oy + 6, ox + 38, oy + 10, withAlpha(0xFFFFD700, alpha));
-				gfx.fill(ox + 20, oy + 10, ox + 28, oy + 14, withAlpha(0xFFFFD700, alpha));
-			}
-		}
-	}
 }

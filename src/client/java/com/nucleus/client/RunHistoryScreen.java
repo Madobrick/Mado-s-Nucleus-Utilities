@@ -33,7 +33,7 @@ public class RunHistoryScreen extends Screen {
 
 	public static void open(Screen parent) {
 		Minecraft client = Minecraft.getInstance();
-		client.execute(() -> client.setScreen(new RunHistoryScreen(parent)));
+		client.execute(() -> client.gui.setScreen(new RunHistoryScreen(parent)));
 	}
 
 	@Override
@@ -80,7 +80,7 @@ public class RunHistoryScreen extends Screen {
 					rebuildWidgets();
 				} else {
 					Minecraft client = Minecraft.getInstance();
-					client.setScreen(parent instanceof MadoBrickScreen ? new MadoBrickScreen(MadoBrickScreen.Tab.SPEEDRUNS) : parent);
+					client.gui.setScreen(parent instanceof MadoBrickScreen ? new MadoBrickScreen(MadoBrickScreen.Tab.SPEEDRUNS) : parent);
 				}
 			}).pos(cx - 75, this.height - 28).size(150, 20).build());
 	}

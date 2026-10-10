@@ -108,7 +108,7 @@ public final class Scavenger {
 			lastTools.putAll(scanTools(client));
 			return;
 		}
-		if (client.screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen) {
+		if (client.gui.screen() instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen) {
 			// Backpacks, chests, trades: inventory shuffles through a
 			// container GUI are never fresh finds — absorb them silently.
 			lastTools.clear();

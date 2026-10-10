@@ -32,7 +32,7 @@ public class RngdleBestScreen extends Screen {
 
 	public static void open(Screen parent) {
 		Minecraft client = Minecraft.getInstance();
-		client.execute(() -> client.setScreen(new RngdleBestScreen(parent)));
+		client.execute(() -> client.gui.setScreen(new RngdleBestScreen(parent)));
 	}
 
 	@Override
@@ -55,7 +55,7 @@ public class RngdleBestScreen extends Screen {
 					rebuildWidgets();
 				} else {
 					Minecraft client = Minecraft.getInstance();
-					client.setScreen(parent instanceof MadoBrickScreen ? new MadoBrickScreen() : parent);
+					client.gui.setScreen(parent instanceof MadoBrickScreen ? new MadoBrickScreen() : parent);
 				}
 			}).pos(cx - 75, this.height - 28).size(150, 20).build());
 	}

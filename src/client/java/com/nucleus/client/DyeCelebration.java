@@ -72,7 +72,7 @@ public final class DyeCelebration {
 		if (textureHash == null || !textureHash.matches("[0-9a-f]{64}")) {
 			NucleusMod.LOGGER.warn("Bad head texture hash '{}' for '{}', dye fallback in use",
 				textureHash, displayName);
-			return new ItemStack(Items.CYAN_DYE);
+			return new ItemStack(Items.DYE.pick(net.minecraft.world.item.DyeColor.CYAN));
 		}
 		try {
 			String json = "{\"textures\":{\"SKIN\":{\"url\":\"http://textures.minecraft.net/texture/"
@@ -98,7 +98,7 @@ public final class DyeCelebration {
 			stack.set(DataComponents.CUSTOM_NAME, Component.literal(displayName));
 			return stack;
 		} catch (Exception ignored) {
-			return new ItemStack(Items.CYAN_DYE);
+			return new ItemStack(Items.DYE.pick(net.minecraft.world.item.DyeColor.CYAN));
 		}
 	}
 

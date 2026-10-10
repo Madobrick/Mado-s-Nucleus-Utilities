@@ -19,7 +19,7 @@ public final class MadoChat {
 		if (!allowed() || client == null || client.gui == null) {
 			return;
 		}
-		client.gui.getChat().addClientSystemMessage(text);
+		client.gui.hud.getChat().addClientSystemMessage(text);
 	}
 
 	public static void feedback(FabricClientCommandSource src, Component text) {

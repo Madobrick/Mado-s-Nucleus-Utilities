@@ -136,7 +136,7 @@ public class MadoBrickScreen extends Screen {
 
 	public static void open(Tab tab) {
 		Minecraft client = Minecraft.getInstance();
-		client.execute(() -> client.setScreen(new MadoBrickScreen(tab)));
+		client.execute(() -> client.gui.setScreen(new MadoBrickScreen(tab)));
 	}
 
 	/** Small label above an odds box (gambling tab). */
@@ -1050,7 +1050,7 @@ public class MadoBrickScreen extends Screen {
 
 		Button testButton = Button.builder(Component.literal("Test animation"), btn -> {
 			// Out of the config first so the stage has the full screen.
-			Minecraft.getInstance().setScreen(null);
+			Minecraft.getInstance().gui.setScreen(null);
 			JackpotAnimation.DropType shown =
 				JackpotAnimation.startPreview(NucleusMod.CONFIG.jackpotPreview);
 			MadoChat.chat(Minecraft.getInstance(), Component.literal(
@@ -1728,7 +1728,7 @@ public class MadoBrickScreen extends Screen {
 			}
 		}
 		NucleusMod.CONFIG.save();
-		Minecraft.getInstance().setScreen(null);
+		Minecraft.getInstance().gui.setScreen(null);
 	}
 
 	@Override

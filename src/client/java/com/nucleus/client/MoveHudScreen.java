@@ -70,7 +70,7 @@ public class MoveHudScreen extends Screen {
 
 	public static void open(Screen parent) {
 		Minecraft client = Minecraft.getInstance();
-		client.execute(() -> client.setScreen(new MoveHudScreen(parent)));
+		client.execute(() -> client.gui.setScreen(new MoveHudScreen(parent)));
 	}
 
 	private static float clampScale(float s) {
@@ -172,7 +172,7 @@ public class MoveHudScreen extends Screen {
 		}
 		addRenderableWidget(Button.builder(Component.literal("Done"), btn -> {
 			saveAll();
-			Minecraft.getInstance().setScreen(parent);
+			Minecraft.getInstance().gui.setScreen(parent);
 		}).pos(this.width / 2 - 100, this.height - 30).size(200, 20).build());
 	}
 

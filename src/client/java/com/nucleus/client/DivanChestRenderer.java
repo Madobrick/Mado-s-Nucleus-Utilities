@@ -62,7 +62,7 @@ public final class DivanChestRenderer {
 		// culled, which is why the old eye/camera-anchored line vanished.
 		Vec3 crosshair = eye;
 		try {
-			var cam = client.gameRenderer.getMainCamera();
+			var cam = client.gameRenderer.mainCamera();
 			Vec3 camPos = cam.position();
 			org.joml.Vector3fc fwd = cam.forwardVector();
 			crosshair = new Vec3(

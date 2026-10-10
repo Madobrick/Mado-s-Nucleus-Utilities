@@ -2,7 +2,7 @@ package com.nucleus.client;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.monster.MagmaCube;
+import net.minecraft.world.entity.monster.cubemob.MagmaCube;
 import net.minecraft.world.phys.Vec3;
 
 import com.nucleus.NucleusMod;
@@ -98,7 +98,7 @@ public final class BalWatch {
 		// Vote 1 — boss bar named Bal: server-driven, works at any distance.
 		boolean bossBal = false;
 		try {
-			var overlay = client.gui.getBossOverlay();
+			var overlay = client.gui.hud.getBossOverlay();
 			var events = ((com.nucleus.client.mixin.BossOverlayAccessor) overlay).nucleus$getEvents();
 			lastBossNames.clear();
 			if (events != null) {

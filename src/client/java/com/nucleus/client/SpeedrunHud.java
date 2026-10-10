@@ -32,7 +32,7 @@ public final class SpeedrunHud implements HudElement {
 		if (client.level == null || client.player == null) {
 			return;
 		}
-		if (client.screen instanceof MoveHudScreen) {
+		if (client.gui.screen() instanceof MoveHudScreen) {
 			return;
 		}
 		SpeedrunManager.State state = SpeedrunManager.state();

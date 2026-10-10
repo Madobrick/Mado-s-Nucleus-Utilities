@@ -1040,10 +1040,10 @@ public final class RngdleGame {
 	private static void takeMythicScreenshot() {
 		try {
 			Minecraft c = Minecraft.getInstance();
-			if (c == null || c.getMainRenderTarget() == null) {
+			if (c == null || c.gameRenderer.mainRenderTarget() == null) {
 				return;
 			}
-			net.minecraft.client.Screenshot.grab(c.gameDirectory, c.getMainRenderTarget(),
+			net.minecraft.client.Screenshot.grab(c.gameDirectory, c.gameRenderer.mainRenderTarget(),
 				msg -> c.execute(() -> MadoChat.chat(c, msg)));
 		} catch (Exception e) {
 			NucleusMod.LOGGER.warn("RNGdle screenshot failed: {}", e.toString());

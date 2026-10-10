@@ -36,7 +36,7 @@ public final class DyeHud implements HudElement {
 		if (client.level == null || client.player == null) {
 			return;
 		}
-		if (client.screen instanceof MoveHudScreen) {
+		if (client.gui.screen() instanceof MoveHudScreen) {
 			return;
 		}
 		try {

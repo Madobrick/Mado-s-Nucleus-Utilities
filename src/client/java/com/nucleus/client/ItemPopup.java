@@ -121,7 +121,7 @@ public final class ItemPopup {
 		}
 		GpuTexture depthTexture;
 		try {
-			depthTexture = minecraft.getMainRenderTarget().getDepthTexture();
+			depthTexture = minecraft.gameRenderer.mainRenderTarget().getDepthTexture();
 		} catch (Exception ignored) {
 			return;
 		}
@@ -134,8 +134,7 @@ public final class ItemPopup {
 			RenderSystem.getDevice().createCommandEncoder().clearDepthTexture(depthTexture, 1D);
 			renderItem(minecraft, s, total - left, total, submitNodeStorage,
 				deltaTracker.getGameTimeDeltaPartialTick(true));
-			featureRenderDispatcher.renderAllFeatures();
-			renderBuffers.bufferSource().endBatch();
+			featureRenderDispatcher.renderAllFeatures(submitNodeStorage);
 		} catch (Exception e) {
 			NucleusMod.LOGGER.warn("Item popup render failed: {}", e.toString());
 			stack = null;
@@ -193,7 +192,7 @@ public final class ItemPopup {
 			: Mth.abs(Mth.sin(halfRotations)))));
 		poseStack.mulPose(Axis.XP.rotationDegrees(6f * Mth.cos(progress * 8f)));
 		poseStack.mulPose(Axis.ZP.rotationDegrees(6f * Mth.cos(progress * 8f)));
-		minecraft.gameRenderer.getLighting().setupFor(Lighting.Entry.ITEMS_3D);
+		minecraft.gameRenderer.lighting().setupFor(Lighting.Entry.ITEMS_3D);
 		ItemStackRenderState state = new ItemStackRenderState();
 		minecraft.getItemModelResolver().updateForTopItem(state, s, ItemDisplayContext.FIXED, minecraft.level, null, 0);
 		state.submit(poseStack, collector, 15728880, OverlayTexture.NO_OVERLAY, 0);

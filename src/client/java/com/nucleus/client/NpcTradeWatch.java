@@ -196,7 +196,7 @@ public final class NpcTradeWatch {
 		// (chat covers those regardless).
 		boolean containerOpen;
 		try {
-			containerOpen = client.screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+			containerOpen = client.gui.screen() instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 		} catch (Exception ignored) {
 			containerOpen = false;
 		}

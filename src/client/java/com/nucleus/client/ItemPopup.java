@@ -131,7 +131,9 @@ public final class ItemPopup {
 		try {
 			RenderSystem.setProjectionMatrix(hud3dProjectionMatrixBuffer.getBuffer(hudProjection),
 				ProjectionType.PERSPECTIVE);
-			RenderSystem.getDevice().createCommandEncoder().clearDepthTexture(depthTexture, 1D);
+			// No explicit depth clear: in the pass-based frame model an
+			// unsubmitted standalone clear is dropped (and leaks the
+			// encoder), which left the pop invisible.
 			renderItem(minecraft, s, total - left, total, submitNodeStorage,
 				deltaTracker.getGameTimeDeltaPartialTick(true));
 			featureRenderDispatcher.renderAllFeatures(submitNodeStorage);

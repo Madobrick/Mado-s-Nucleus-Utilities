@@ -24,9 +24,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(GameRenderer.class)
 public abstract class GameRendererMixin {
+	// 26.2 renamed the hand/screen submit storage (same contents/role).
 	@Shadow
 	@Final
-	private SubmitNodeStorage submitNodeStorage;
+	private SubmitNodeStorage handAndScreenSubmitNodeStorage;
 
 	@Shadow
 	@Final
@@ -48,7 +49,7 @@ public abstract class GameRendererMixin {
 		target = "Lnet/minecraft/client/gui/render/GuiRenderer;endFrame()V", shift = At.Shift.AFTER))
 	private void nucleus$itemPopup(DeltaTracker deltaTracker, boolean advanceGameTime, CallbackInfo ci) {
 		try {
-			ItemPopup.render(hud3dProjectionMatrixBuffer, hudProjection, submitNodeStorage,
+			ItemPopup.render(hud3dProjectionMatrixBuffer, hudProjection, handAndScreenSubmitNodeStorage,
 				deltaTracker, featureRenderDispatcher, renderBuffers);
 		} catch (Exception ignored) {
 		}

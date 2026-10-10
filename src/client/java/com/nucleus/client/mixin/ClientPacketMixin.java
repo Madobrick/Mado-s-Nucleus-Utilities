@@ -155,7 +155,7 @@ public class ClientPacketMixin {
 		try {
 			int count;
 			try {
-				count = packet.getCount();
+				count = packet.count();
 			} catch (Exception ignored) {
 				return;
 			}
@@ -164,7 +164,7 @@ public class ClientPacketMixin {
 			}
 			String typeKey = "";
 			try {
-				var particle = packet.getParticle();
+				var particle = packet.particle();
 				var type = particle.getType();
 				var key = net.minecraft.core.registries.BuiltInRegistries.PARTICLE_TYPE.getKey(type);
 				if (key != null) {
@@ -172,7 +172,7 @@ public class ClientPacketMixin {
 				}
 			} catch (Exception ignored) {
 			}
-			com.nucleus.client.BalWatch.onParticles(packet.getX(), packet.getY(), packet.getZ(), count, typeKey);
+			com.nucleus.client.BalWatch.onParticles(packet.x(), packet.y(), packet.z(), count, typeKey);
 		} catch (Exception ignored) {
 		}
 	}

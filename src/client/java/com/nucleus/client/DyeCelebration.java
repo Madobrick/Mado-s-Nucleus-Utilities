@@ -177,13 +177,16 @@ public final class DyeCelebration {
 	 * The 3D head pop: vanilla's own item activation, Mojang-tested and
 	 * rendered above everything. Fixed ~2s play, which suits the dye's
 	 * quick sting (the jackpot uses {@link ItemPopup} for its long show).
+	 *
+	 * <p>26.3 removed the vanilla activation hook, so this routes through
+	 * our own popup with vanilla-equivalent timing (40 ticks).
 	 */
 	private static void popup(Minecraft client) {
 		try {
 			if (client.gameRenderer == null) {
 				return;
 			}
-			client.gameRenderer.displayItemActivation(fakeDye().copy());
+			ItemPopup.popup(fakeDye().copy(), 40, false, false, false, 0f);
 			NucleusMod.LOGGER.info("Dye popup submitted (item={})", fakeDye().getItem());
 		} catch (Exception e) {
 			NucleusMod.LOGGER.warn("Dye popup failed: {}", e.toString());

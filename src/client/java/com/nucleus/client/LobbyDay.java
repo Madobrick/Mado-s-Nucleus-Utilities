@@ -45,14 +45,9 @@ public final class LobbyDay {
 		}
 		long worldTime;
 		try {
-			// 26.1 moved the day clock behind the registry clock system;
-			// OVERWORLD is the lobby's main day/night clock (Scatha-Pro
-			// read the same value via getDefaultClockTime).
-			net.minecraft.core.Registry<net.minecraft.world.clock.WorldClock> clocks =
-				client.level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.WORLD_CLOCK);
-			net.minecraft.core.Holder<net.minecraft.world.clock.WorldClock> overworld =
-				clocks.getOrThrow(net.minecraft.world.clock.WorldClocks.OVERWORLD);
-			worldTime = client.level.clockManager().getTotalTicks(overworld);
+			// 26.3 collapsed the registry clock managers; the level's own
+			// default clock reads the same overworld lobby time.
+			worldTime = client.level.getDefaultClockTime();
 		} catch (Exception ignored) {
 			return;
 		}

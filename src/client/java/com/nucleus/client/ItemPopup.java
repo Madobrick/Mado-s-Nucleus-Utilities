@@ -3,7 +3,7 @@ package com.nucleus.client;
 import com.mojang.blaze3d.ProjectionType;
 import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
 
@@ -131,10 +131,21 @@ public final class ItemPopup {
 		try {
 			RenderSystem.setProjectionMatrix(hud3dProjectionMatrixBuffer.getBuffer(hudProjection),
 				ProjectionType.PERSPECTIVE);
-			RenderSystem.getDevice().createCommandEncoder().clearDepthTexture(depthTexture, 1D);
 			renderItem(minecraft, s, total - left, total, submitNodeStorage,
 				deltaTracker.getGameTimeDeltaPartialTick(true));
-			featureRenderDispatcher.renderAllFeatures(submitNodeStorage);
+			// 26.3 frame model (mirrors vanilla's own post-GUI pass):
+			// prepare, open a pass on the main target with depth cleared
+			// (the old explicit clearDepthTexture), execute all, close.
+			var target = minecraft.gameRenderer.mainRenderTarget();
+			var frame = featureRenderDispatcher.prepareFrame(submitNodeStorage);
+			var encoder = RenderSystem.getDevice().createCommandEncoder();
+			try (var pass = encoder.createRenderPass(() -> "nucleus:item_popup",
+				target.getColorTextureView(), java.util.Optional.empty(),
+				target.getDepthTextureView(), java.util.OptionalDouble.of(1.0))) {
+				RenderSystem.bindDefaultUniforms(pass);
+				FeatureRenderDispatcher.renderAllFeatures(pass, frame);
+			}
+			frame.close();
 		} catch (Exception e) {
 			NucleusMod.LOGGER.warn("Item popup render failed: {}", e.toString());
 			stack = null;
@@ -181,17 +192,17 @@ public final class ItemPopup {
 		scale *= endT * endT;
 		poseStack.scale(scale, scale, scale);
 		if (yawOffset != 0f) {
-			poseStack.mulPose(Axis.YP.rotationDegrees(yawOffset));
+			poseStack.rotateDegrees(Axis.YP, yawOffset);
 		}
 		if (angled) {
-			poseStack.mulPose(Axis.XP.rotationDegrees(20f));
-			poseStack.mulPose(Axis.YP.rotationDegrees(30f));
+			poseStack.rotateDegrees(Axis.XP, 20f);
+			poseStack.rotateDegrees(Axis.YP, 30f);
 		}
-		poseStack.mulPose(Axis.YP.rotationDegrees(1080f * (altCurve
+		poseStack.rotateDegrees(Axis.YP, 1080f * (altCurve
 			? (float) Math.pow(Mth.sin(progress * (float) Math.PI), 0.5D)
-			: Mth.abs(Mth.sin(halfRotations)))));
-		poseStack.mulPose(Axis.XP.rotationDegrees(6f * Mth.cos(progress * 8f)));
-		poseStack.mulPose(Axis.ZP.rotationDegrees(6f * Mth.cos(progress * 8f)));
+			: Mth.abs(Mth.sin(halfRotations))));
+		poseStack.rotateDegrees(Axis.XP, 6f * Mth.cos(progress * 8f));
+		poseStack.rotateDegrees(Axis.ZP, 6f * Mth.cos(progress * 8f));
 		minecraft.gameRenderer.lighting().setupFor(Lighting.Entry.ITEMS_3D);
 		ItemStackRenderState state = new ItemStackRenderState();
 		minecraft.getItemModelResolver().updateForTopItem(state, s, ItemDisplayContext.FIXED, minecraft.level, null, 0);

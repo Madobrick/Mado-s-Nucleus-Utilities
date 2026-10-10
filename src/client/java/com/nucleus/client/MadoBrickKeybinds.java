@@ -35,7 +35,7 @@ public final class MadoBrickKeybinds {
 		SET_WAYPOINTS = KeyMappingHelper.registerKeyMapping(
 			new KeyMapping(
 				"key.nucleus.set_waypoints",
-				InputConstants.Type.KEYSYM,
+				InputConstants.Type.KEYBOARD,
 				InputConstants.KEY_G,
 				MADOBRICK_CATEGORY
 			)
@@ -43,7 +43,7 @@ public final class MadoBrickKeybinds {
 		SET_CUSTOM = KeyMappingHelper.registerKeyMapping(
 			new KeyMapping(
 				"key.nucleus.set_custom_waypoint",
-				InputConstants.Type.KEYSYM,
+				InputConstants.Type.KEYBOARD,
 				InputConstants.KEY_H,
 				MADOBRICK_CATEGORY
 			)
@@ -51,7 +51,7 @@ public final class MadoBrickKeybinds {
 		REMOVE_LAST_CUSTOM = KeyMappingHelper.registerKeyMapping(
 			new KeyMapping(
 				"key.nucleus.remove_last_custom",
-				InputConstants.Type.KEYSYM,
+				InputConstants.Type.KEYBOARD,
 				InputConstants.UNKNOWN.getValue(),
 				MADOBRICK_CATEGORY
 			)

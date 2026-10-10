@@ -2,7 +2,7 @@ package com.nucleus.client.mixin;
 
 import com.nucleus.client.ItemPopup;
 
-import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.Projection;
 import net.minecraft.client.renderer.ProjectionMatrixBuffer;
@@ -45,12 +45,14 @@ public abstract class GameRendererMixin {
 	@Final
 	private RenderBuffers renderBuffers;
 
+	// 26.3 render() takes no args, so the tracker comes from the client.
 	@Inject(method = "render", at = @At(value = "INVOKE",
 		target = "Lnet/minecraft/client/gui/render/GuiRenderer;endFrame()V", shift = At.Shift.AFTER))
-	private void nucleus$itemPopup(DeltaTracker deltaTracker, boolean advanceGameTime, CallbackInfo ci) {
+	private void nucleus$itemPopup(CallbackInfo ci) {
 		try {
+			Minecraft client = Minecraft.getInstance();
 			ItemPopup.render(hud3dProjectionMatrixBuffer, hudProjection, handAndScreenSubmitNodeStorage,
-				deltaTracker, featureRenderDispatcher, renderBuffers);
+				client.getDeltaTracker(), featureRenderDispatcher, renderBuffers);
 		} catch (Exception ignored) {
 		}
 	}

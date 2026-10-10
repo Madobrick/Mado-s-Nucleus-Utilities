@@ -40,6 +40,8 @@ public class NucleusConfig {
 	// --- Custom waypoint (under player feet, shares line settings above) ---
 	public boolean showCustomWaypoint = true;
 	public int customWaypointColor = 0xFFFFFFFF;
+	/** Dims waypoints past etherwarp range (61 blocks) so range reads at a glance. */
+	public boolean waypointDimBeyondEtherwarp = true;
 
 	// --- Bal timer (Crystal Hollows) ---
 	public boolean balTimerEnabled = false;
@@ -59,6 +61,30 @@ public class NucleusConfig {
 	public int scavengerX = 10;
 	public int scavengerY = 120;
 	public float scavengerScale = 1.0f;
+	/** Tracker rate line: false = tools/hour, true = sets/hour. */
+	public boolean scavengerSetsPerHour = false;
+
+	// --- Divan chest locator (Mines of Divan, packet-driven) ---
+	public boolean divanChestEnabled = false;
+	public boolean divanChestText = true;
+	/** Mutes the metal-detector harp ding while the detector is held. */
+	public boolean divanMuteDetector = false;
+	/** RNGdle number-game overlay on every completed scavenged tool set. */
+	public boolean rngdleEnabled = true;
+	/** RNGdle dopamine sound volume 0-200 percent. */
+	public int rngdleVolume = 100;
+	/** RNGdle card top-left (-1 = centered); scale 0.5-3.0. */
+	public int rngdleHudX = -1;
+	public int rngdleHudY = -1;
+	public float rngdleHudScale = 1.0f;
+	/** Shows a short "how earned" hint under each RNGdle badge. */
+	public boolean rngdleShowDescriptions = false;
+	/** Auto-screenshots top 1% (Mythic) RNGdle rolls. */
+	public boolean rngdleAutoScreenshot = false;
+	public int divanChestColor = 0xFF55FF55;
+	public int divanChestHudX = 10;
+	public int divanChestHudY = 140;
+	public float divanChestHudScale = 1.0f;
 
 	// --- Hollows alerts ---
 	/** Wrong-pet warning in the Mines without the Mole (needs Pet tab widget). */
@@ -74,6 +100,8 @@ public class NucleusConfig {
 	public boolean objectiveSoundOn = true;
 	/** Objective sound volume 0-200 percent. */
 	public int objectiveSoundVolume = 80;
+	/** Achievement unlock jingle volume 0-200 percent. */
+	public int achievementVolume = 80;
 	/**
 	 * When true, vanilla mod sounds play straight to the OS mixer (ignoring
 	 * Minecraft's volume sliders). When false, everything goes through the
@@ -93,8 +121,30 @@ public class NucleusConfig {
 	public boolean jackpotEnabled = true;
 	/** Jackpot sound volume 0-200 percent (OS mixer: ignores Minecraft's sliders). */
 	public int jackpotVolume = 100;
-	/** Animation speed multiplier (0.5 - 2.0). Higher is faster. */
-	public float jackpotSpeed = 1.0f;
+	/** First-part speed percent 50-200: feature text, spin-power and luck (100 = normal). */
+	public int jackpotSpeedEarlyPct = 100;
+	/** Second-part speed percent 50-200: the wheel spin (100 = normal). */
+	public int jackpotSpeedWheelPct = 100;
+	/** Third-part speed percent 50-200: the celebration screen (100 = normal). */
+	public int jackpotSpeedCelebPct = 100;
+	/** Old single speed value, kept only to migrate pre-split configs. */
+	@Deprecated
+	public int jackpotSpeedPct = 100;
+
+	/** 1-in-N odds for the consolation lottery on bundle loot lines. */
+	public int jackpotOddsJaderald = 3;
+	public int jackpotOddsFragment = 8;
+	public int jackpotOddsMixture = 3;
+	public int jackpotOddsFlawless = 1;
+
+	/** Zoom level percent 0-100 for the wheel finale (0 = off). */
+	public int jackpotZoomPct = 50;
+
+	/** Black box over chat loot during the pre-reveal stages. */
+	public boolean hideBundle = false;
+
+	/** Test-animation drop: random, alloy, claw, jade, jaderald, fragment, mixture. */
+	public String jackpotPreview = "random";
 
 	/** Timer background tint 0-100 (Bal + speedrun HUD text boxes). */
 	public int timerBg = 50;
@@ -105,8 +155,17 @@ public class NucleusConfig {
 	/** Master switch for the crystal-run speedrun timer. */
 	public boolean speedrunEnabled = true;
 
+	/** Prints a lobby run summary in chat when leaving a lobby with 2+ runs. */
+	public boolean lobbySummary = true;
+
 	/** SAFE MODE: blocks every /warp except /warp nucleus|cn. */
 	public boolean safeMode = false;
+
+	/** Auto safe mode: switches safe mode on after N runs in one lobby. */
+	public boolean autoSafeMode = false;
+
+	/** Finished runs in one lobby before auto safe mode triggers (1-20). */
+	public int autoSafeModeRuns = 3;
 
 	/** Warns when the tab Info widget can't be found (dismissable in chat). */
 	public boolean tabWarnEnabled = true;
@@ -137,6 +196,7 @@ public class NucleusConfig {
 		waypoint3Color = 0xFFFFAA00;
 		showCustomWaypoint = true;
 		customWaypointColor = 0xFFFFFFFF;
+		waypointDimBeyondEtherwarp = true;
 		balTimerEnabled = false;
 		balTimerX = 10;
 		balTimerY = 80;
@@ -149,6 +209,21 @@ public class NucleusConfig {
 		scavengerX = 10;
 		scavengerY = 120;
 		scavengerScale = 1.0f;
+		scavengerSetsPerHour = false;
+		divanChestEnabled = false;
+		divanChestText = true;
+		divanMuteDetector = false;
+		rngdleEnabled = true;
+		rngdleVolume = 100;
+		rngdleHudX = -1;
+		rngdleHudY = -1;
+		rngdleHudScale = 1.0f;
+		rngdleShowDescriptions = false;
+		rngdleAutoScreenshot = false;
+		divanChestColor = 0xFF55FF55;
+		divanChestHudX = 10;
+		divanChestHudY = 140;
+		divanChestHudScale = 1.0f;
 		petAlertEnabled = false;
 		lowToolsAlertEnabled = false;
 		alertOffX = 0;
@@ -156,6 +231,7 @@ public class NucleusConfig {
 		alertScale = 1.0f;
 		objectiveSoundOn = true;
 		objectiveSoundVolume = 80;
+		achievementVolume = 80;
 		bypassMinecraftVolume = false;
 		objectiveSoundId = "minecraft:block.bone_block.place";
 		customSoundEnabled = false;
@@ -164,11 +240,24 @@ public class NucleusConfig {
 		mobHighlightWalls = true;
 		jackpotEnabled = true;
 		jackpotVolume = 100;
-		jackpotSpeed = 1.0f;
+		jackpotSpeedEarlyPct = 100;
+		jackpotSpeedWheelPct = 100;
+		jackpotSpeedCelebPct = 100;
+		jackpotSpeedPct = 100;
+		jackpotOddsJaderald = 3;
+		jackpotOddsFragment = 8;
+		jackpotOddsMixture = 3;
+		jackpotOddsFlawless = 1;
+		jackpotZoomPct = 50;
+		hideBundle = false;
+		jackpotPreview = "random";
 		timerBg = 50;
 		quietChat = false;
 		speedrunEnabled = true;
+		lobbySummary = true;
 		safeMode = false;
+		autoSafeMode = false;
+		autoSafeModeRuns = 3;
 		tabWarnEnabled = true;
 		soundYolkar = true;
 		soundCrystal = true;
@@ -202,18 +291,19 @@ public class NucleusConfig {
 				waypoint1Color = loaded.waypoint1Color;
 				waypoint2Color = loaded.waypoint2Color;
 				waypoint3Color = loaded.waypoint3Color;
-				showCustomWaypoint = loaded.showCustomWaypoint;
-				if (loaded.customWaypointColor != 0) {
-					customWaypointColor = loaded.customWaypointColor;
-				}
+			showCustomWaypoint = loaded.showCustomWaypoint;
+			if (loaded.customWaypointColor != 0) {
+				customWaypointColor = loaded.customWaypointColor;
+			}
+			waypointDimBeyondEtherwarp = loaded.waypointDimBeyondEtherwarp;
 				balTimerEnabled = loaded.balTimerEnabled;
 				if (loaded.balTimerX != 0 || loaded.balTimerY != 0) {
 					balTimerX = loaded.balTimerX;
 					balTimerY = loaded.balTimerY;
 				}
-				if (loaded.balTimerScale >= 0.5f && loaded.balTimerScale <= 3.0f) {
-					balTimerScale = loaded.balTimerScale;
-				}
+			if (loaded.balTimerScale >= 0.5f && loaded.balTimerScale <= 3.0f) {
+				balTimerScale = loaded.balTimerScale;
+			}
 				lobbyDayEnabled = loaded.lobbyDayEnabled;
 				if (loaded.lobbyDayX != 0 || loaded.lobbyDayY != 0) {
 					lobbyDayX = loaded.lobbyDayX;
@@ -222,14 +312,40 @@ public class NucleusConfig {
 				if (loaded.lobbyDayScale >= 0.5f && loaded.lobbyDayScale <= 3.0f) {
 					lobbyDayScale = loaded.lobbyDayScale;
 				}
-				scavengerEnabled = loaded.scavengerEnabled;
-				if (loaded.scavengerX != 0 || loaded.scavengerY != 0) {
-					scavengerX = loaded.scavengerX;
-					scavengerY = loaded.scavengerY;
-				}
-				if (loaded.scavengerScale >= 0.5f && loaded.scavengerScale <= 3.0f) {
-					scavengerScale = loaded.scavengerScale;
-				}
+			scavengerEnabled = loaded.scavengerEnabled;
+			if (loaded.scavengerX != 0 || loaded.scavengerY != 0) {
+				scavengerX = loaded.scavengerX;
+				scavengerY = loaded.scavengerY;
+			}
+			if (loaded.scavengerScale >= 0.5f && loaded.scavengerScale <= 3.0f) {
+				scavengerScale = loaded.scavengerScale;
+			}
+			scavengerSetsPerHour = loaded.scavengerSetsPerHour;
+			divanChestEnabled = loaded.divanChestEnabled;
+			divanChestText = loaded.divanChestText;
+			divanMuteDetector = loaded.divanMuteDetector;
+			rngdleEnabled = loaded.rngdleEnabled;
+			if (loaded.rngdleVolume >= 0 && loaded.rngdleVolume <= 200) {
+				rngdleVolume = loaded.rngdleVolume;
+			}
+			rngdleHudX = loaded.rngdleHudX;
+			rngdleHudY = loaded.rngdleHudY;
+			rngdleShowDescriptions = loaded.rngdleShowDescriptions;
+			rngdleAutoScreenshot = loaded.rngdleAutoScreenshot;
+			if (loaded.rngdleHudScale >= 0.5f && loaded.rngdleHudScale <= 3.0f) {
+				rngdleHudScale = loaded.rngdleHudScale;
+			}
+			if (loaded.divanChestColor != 0) {
+				// Migrate old orange default to green.
+				divanChestColor = loaded.divanChestColor == 0xFFFFAA00 ? 0xFF55FF55 : loaded.divanChestColor;
+			}
+			if (loaded.divanChestHudX != 0 || loaded.divanChestHudY != 0) {
+				divanChestHudX = loaded.divanChestHudX;
+				divanChestHudY = loaded.divanChestHudY;
+			}
+			if (loaded.divanChestHudScale >= 0.5f && loaded.divanChestHudScale <= 3.0f) {
+				divanChestHudScale = loaded.divanChestHudScale;
+			}
 				petAlertEnabled = loaded.petAlertEnabled;
 				lowToolsAlertEnabled = loaded.lowToolsAlertEnabled;
 				alertOffX = loaded.alertOffX;
@@ -238,9 +354,12 @@ public class NucleusConfig {
 					alertScale = loaded.alertScale;
 				}
 				objectiveSoundOn = loaded.objectiveSoundOn;
-				if (loaded.objectiveSoundVolume >= 0 && loaded.objectiveSoundVolume <= 200) {
-					objectiveSoundVolume = loaded.objectiveSoundVolume;
-				}
+			if (loaded.objectiveSoundVolume >= 0 && loaded.objectiveSoundVolume <= 200) {
+				objectiveSoundVolume = loaded.objectiveSoundVolume;
+			}
+			if (loaded.achievementVolume >= 0 && loaded.achievementVolume <= 200) {
+				achievementVolume = loaded.achievementVolume;
+			}
 				bypassMinecraftVolume = loaded.bypassMinecraftVolume;
 				if (loaded.objectiveSoundId != null && !loaded.objectiveSoundId.isBlank()) {
 					objectiveSoundId = loaded.objectiveSoundId;
@@ -252,18 +371,55 @@ public class NucleusConfig {
 			mobHighlightEnabled = loaded.mobHighlightEnabled;
 			mobHighlightWalls = loaded.mobHighlightWalls;
 			jackpotEnabled = loaded.jackpotEnabled;
+			if (loaded.jackpotSpeedEarlyPct >= 50 && loaded.jackpotSpeedEarlyPct <= 200) {
+				jackpotSpeedEarlyPct = loaded.jackpotSpeedEarlyPct;
+			} else if (loaded.jackpotSpeedPct >= 50 && loaded.jackpotSpeedPct <= 200) {
+				// Migrate the old single speed value to all three parts.
+				jackpotSpeedEarlyPct = loaded.jackpotSpeedPct;
+			}
+			if (loaded.jackpotSpeedWheelPct >= 50 && loaded.jackpotSpeedWheelPct <= 200) {
+				jackpotSpeedWheelPct = loaded.jackpotSpeedWheelPct;
+			} else if (loaded.jackpotSpeedPct >= 50 && loaded.jackpotSpeedPct <= 200) {
+				jackpotSpeedWheelPct = loaded.jackpotSpeedPct;
+			}
+			if (loaded.jackpotSpeedCelebPct >= 50 && loaded.jackpotSpeedCelebPct <= 200) {
+				jackpotSpeedCelebPct = loaded.jackpotSpeedCelebPct;
+			} else if (loaded.jackpotSpeedPct >= 50 && loaded.jackpotSpeedPct <= 200) {
+				jackpotSpeedCelebPct = loaded.jackpotSpeedPct;
+			}
+			if (loaded.jackpotOddsJaderald >= 1 && loaded.jackpotOddsJaderald <= 1000000) {
+				jackpotOddsJaderald = loaded.jackpotOddsJaderald;
+			}
+			if (loaded.jackpotOddsFragment >= 1 && loaded.jackpotOddsFragment <= 1000000) {
+				jackpotOddsFragment = loaded.jackpotOddsFragment;
+			}
+			if (loaded.jackpotOddsMixture >= 1 && loaded.jackpotOddsMixture <= 1000000) {
+				jackpotOddsMixture = loaded.jackpotOddsMixture;
+			}
+			if (loaded.jackpotOddsFlawless >= 1 && loaded.jackpotOddsFlawless <= 1000000) {
+				jackpotOddsFlawless = loaded.jackpotOddsFlawless;
+			}
+			if (loaded.jackpotZoomPct >= 0 && loaded.jackpotZoomPct <= 100) {
+				jackpotZoomPct = loaded.jackpotZoomPct;
+			}
+			hideBundle = loaded.hideBundle;
+			if (loaded.jackpotPreview != null && !loaded.jackpotPreview.isBlank()) {
+				jackpotPreview = loaded.jackpotPreview.trim().toLowerCase();
+			}
 			if (loaded.jackpotVolume >= 0 && loaded.jackpotVolume <= 200) {
 				jackpotVolume = loaded.jackpotVolume;
 			}
-				if (loaded.jackpotSpeed >= 0.5f && loaded.jackpotSpeed <= 2.0f) {
-					jackpotSpeed = loaded.jackpotSpeed;
-				}
 				if (loaded.timerBg >= 0 && loaded.timerBg <= 100) {
 					timerBg = loaded.timerBg;
 				}
 				quietChat = loaded.quietChat;
 			speedrunEnabled = loaded.speedrunEnabled;
+			lobbySummary = loaded.lobbySummary;
 			safeMode = loaded.safeMode;
+			autoSafeMode = loaded.autoSafeMode;
+			if (loaded.autoSafeModeRuns >= 1 && loaded.autoSafeModeRuns <= 20) {
+				autoSafeModeRuns = loaded.autoSafeModeRuns;
+			}
 			tabWarnEnabled = loaded.tabWarnEnabled;
 			soundYolkar = loaded.soundYolkar;
 			soundCrystal = loaded.soundCrystal;

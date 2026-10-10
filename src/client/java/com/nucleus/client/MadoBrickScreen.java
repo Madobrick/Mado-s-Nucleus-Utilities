@@ -24,6 +24,7 @@ public class MadoBrickScreen extends Screen {
 	public enum Tab {
 		FEATURES("Features"),
 		WAYPOINTS("Waypoints"),
+		GAMBLING("Gambling"),
 		SOUNDS("Sounds"),
 		SPEEDRUNS("Speedruns"),
 		ACHIEVEMENTS("Achievements");
@@ -76,9 +77,13 @@ public class MadoBrickScreen extends Screen {
 	private Checkbox showCustomBox;
 	private Checkbox balTimerBox;
 	private Checkbox jackpotBox;
-	private EditBox speedBox;
+	private EditBox oddsJaderaldBox;
+	private EditBox oddsFragmentBox;
+	private EditBox oddsMixtureBox;
+	private EditBox oddsFlawlessBox;
 	private Checkbox lobbyDayBox;
 	private Checkbox scavengerBox;
+	private Button divanChestColorButton;
 	private Checkbox petAlertBox;
 	private Checkbox lowToolsBox;
 	private EditBox soundIdBox;
@@ -91,7 +96,7 @@ public class MadoBrickScreen extends Screen {
 	private int catWaypointsY = -1;
 	private int catBalY = -1;
 	private int catGamblingY = -1;
-	private int catTrackersY = -1;
+	private int catMinesY = -1;
 	private int catAlertsY = -1;
 	private int catSoundsY = -1;
 	private int catMobsY = -1;
@@ -113,7 +118,7 @@ public class MadoBrickScreen extends Screen {
 	private int achScroll = 0;
 
 	private static boolean scrollable(Tab tab) {
-		return tab == Tab.FEATURES || tab == Tab.WAYPOINTS || tab == Tab.SOUNDS;
+		return tab == Tab.FEATURES || tab == Tab.WAYPOINTS || tab == Tab.GAMBLING || tab == Tab.SOUNDS;
 	}
 
 	public MadoBrickScreen() {
@@ -132,6 +137,13 @@ public class MadoBrickScreen extends Screen {
 	public static void open(Tab tab) {
 		Minecraft client = Minecraft.getInstance();
 		client.execute(() -> client.setScreen(new MadoBrickScreen(tab)));
+	}
+
+	/** Small label above an odds box (gambling tab). */
+	private void oddsLabel(GuiGraphicsExtractor gfx, EditBox box, String text) {
+		if (box != null && box.visible) {
+			gfx.text(this.font, text, box.getX(), box.getY() - 12, 0xFFFFFFFF, true);
+		}
 	}
 
 	/** Short hover hint for a config widget. */
@@ -192,6 +204,9 @@ public class MadoBrickScreen extends Screen {
 		if (customColorButton != null) {
 			customColorButton.setMessage(customColorLabel(NucleusMod.CONFIG.customWaypointColor));
 		}
+		if (divanChestColorButton != null) {
+			divanChestColorButton.setMessage(divanChestColorLabel(NucleusMod.CONFIG.divanChestColor));
+		}
 	}
 
 	private void cycleColor(int index) {
@@ -210,6 +225,24 @@ public class MadoBrickScreen extends Screen {
 		NucleusMod.CONFIG.customWaypointColor = nextColor(NucleusMod.CONFIG.customWaypointColor);
 		NucleusMod.CONFIG.save();
 		refreshColorButtons();
+	}
+
+	private static Component divanChestColorLabel(int color) {
+		String name = colorName(color);
+		int rgb = color & 0xFFFFFF;
+		return Component.literal("Chest color: ")
+			.append(Component.literal(name).withColor(rgb));
+	}
+
+	private void cycleDivanChestColor() {
+		NucleusMod.CONFIG.divanChestColor = nextColor(NucleusMod.CONFIG.divanChestColor);
+		NucleusMod.CONFIG.save();
+		refreshColorButtons();
+	}
+
+	private static Component trackRateLabel() {
+		return Component.literal("Track in: "
+			+ (NucleusMod.CONFIG.scavengerSetsPerHour ? "sets of tools" : "tools"));
 	}
 
 	private void setTab(Tab tab) {
@@ -237,13 +270,17 @@ public class MadoBrickScreen extends Screen {
 		customKeybindButton = null;
 		removeLastKeybindButton = null;
 		customColorButton = null;
-		speedBox = null;
+		divanChestColorButton = null;
+		oddsJaderaldBox = null;
+		oddsFragmentBox = null;
+		oddsMixtureBox = null;
+		oddsFlawlessBox = null;
 		soundIdBox = null;
 		customPathBox = null;
 		catWaypointsY = -1;
 		catBalY = -1;
 		catGamblingY = -1;
-		catTrackersY = -1;
+		catMinesY = -1;
 		catAlertsY = -1;
 		catSoundsY = -1;
 		catMobsY = -1;
@@ -282,6 +319,8 @@ public class MadoBrickScreen extends Screen {
 			buildFeaturesTab(cx, contentY);
 		} else if (currentTab == Tab.WAYPOINTS) {
 			buildWaypointsTab(cx, contentY);
+		} else if (currentTab == Tab.GAMBLING) {
+			buildGamblingTab(cx, contentY);
 		} else if (currentTab == Tab.SOUNDS) {
 			buildSoundsTab(cx, contentY);
 		} else if (currentTab == Tab.SPEEDRUNS) {
@@ -304,8 +343,54 @@ public class MadoBrickScreen extends Screen {
 	}
 
 	private void buildAchievementsTab(int cx, int startY) {
-		// Rows are drawn as text in extractRenderState; only the bottom row has widgets.
+		// Rows are drawn as text in extractRenderState under a scissor mask,
+		// so they can never overlap the filter button, title or Done row.
+		Button filterButton = Button.builder(achFilterLabel(), btn ->
+			btn.setMessage(achFilterLabel(cycleAchFilter())))
+			.pos(cx - 75, 78).size(150, 18).build();
+		addRenderableWidget(filterButton);
 		addDoneRow(cx, this.height - 40);
+	}
+
+	/** -1 = All, -2 = Unlocked, -3 = Locked, else a tier index. */
+	private static int achFilter = -1;
+
+	private static int cycleAchFilter() {
+		if (achFilter == -1) {
+			achFilter = 0;
+		} else if (achFilter < Achievements.TIER_NAMES.length - 1) {
+			achFilter++;
+		} else if (achFilter == Achievements.TIER_NAMES.length - 1) {
+			achFilter = -2;
+		} else if (achFilter == -2) {
+			achFilter = -3;
+		} else {
+			achFilter = -1;
+		}
+		return achFilter;
+	}
+
+	private static Component achFilterLabel() {
+		return achFilterLabel(achFilter);
+	}
+
+	private static Component achFilterLabel(int filter) {
+		String name;
+		int rgb;
+		if (filter == -2) {
+			name = "Unlocked";
+			rgb = 0x55FF55;
+		} else if (filter == -3) {
+			name = "Locked";
+			rgb = 0xFF5555;
+		} else if (filter < 0) {
+			name = "All";
+			rgb = 0xFFFFFF;
+		} else {
+			name = Achievements.TIER_NAMES[filter];
+			rgb = Achievements.TIER_COLORS[filter] & 0xFFFFFF;
+		}
+		return Component.literal("Filter: ").append(Component.literal(name).withColor(rgb));
 	}
 
 	/** Split row: rename box (25 chars) + ON/OFF toggle + optional move arrows. */
@@ -373,6 +458,16 @@ public class MadoBrickScreen extends Screen {
 		addRenderableWidget(timerBox);
 		y += rowH;
 
+		Checkbox lobbySummaryBox = Checkbox.builder(Component.literal("Show summary after lobby leave"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.lobbySummary)
+			.onValueChange((box, val) -> {
+				NucleusMod.CONFIG.lobbySummary = val;
+				NucleusMod.CONFIG.save();
+			}).build();
+		tip(lobbySummaryBox, "Prints average, fastest and runs/hour\nwhen leaving a lobby with 2+ runs.\nCheck anytime with /mado lobbyStats.");
+		addRenderableWidget(lobbySummaryBox);
+		y += rowH;
+
 		for (String id : new java.util.ArrayList<>(NucleusMod.SPEEDRUN.order)) {
 			y = addSplitRow(cx, y, id, true, true);
 		}
@@ -393,9 +488,9 @@ public class MadoBrickScreen extends Screen {
 		addRenderableWidget(resetRunButton);
 		y += rowH;
 
-		Button historyButton = Button.builder(Component.literal("Run history"), btn -> SpeedrunManager.printHistory())
+		Button historyButton = Button.builder(Component.literal("Run History..."), btn -> RunHistoryScreen.open(this))
 			.pos(cx - 150, y).size(145, 20).build();
-		tip(historyButton, "Print run stats in chat.");
+		tip(historyButton, "Recent + best runs with\nsplits and bundle loot.");
 		addRenderableWidget(historyButton);
 		y += rowH + 4;
 
@@ -459,7 +554,17 @@ public class MadoBrickScreen extends Screen {
 		addRenderableWidget(throughWallsBox);
 		y += rowH;
 
-		y += 10; // extra room for the Line thickness label above the field
+		Checkbox dimFarBox = Checkbox.builder(Component.literal("Dim waypoints out of etherwarp range"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.waypointDimBeyondEtherwarp)
+			.onValueChange((box, val) -> {
+				NucleusMod.CONFIG.waypointDimBeyondEtherwarp = val;
+				NucleusMod.CONFIG.save();
+			}).build();
+		tip(dimFarBox, "Waypoints further than 61 blocks\nrender darker.");
+		addRenderableWidget(dimFarBox);
+		y += rowH;
+
+		y += 16; // extra room for the Outline thickness label above the field
 
 		textBox = Checkbox.builder(Component.literal("Waypoint text labels"), this.font)
 			.pos(cx - 150, y).selected(NucleusMod.CONFIG.waypointText)
@@ -645,50 +750,41 @@ public class MadoBrickScreen extends Screen {
 		int y = startY;
 		int rowH = 22;
 
-		// --- Gambling ---
-		catGamblingY = y;
+		// --- Mines of Divan (tool solver + tools tracker) ---
+		catMinesY = y;
 		y += 14;
 
-		jackpotBox = Checkbox.builder(Component.literal("Gambling animation"), this.font)
-			.pos(cx - 150, y).selected(NucleusMod.CONFIG.jackpotEnabled)
+		Checkbox divanChestBox = Checkbox.builder(Component.literal("Divan chest locator"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.divanChestEnabled)
 			.onValueChange((box, val) -> {
-				NucleusMod.CONFIG.jackpotEnabled = val;
+				NucleusMod.CONFIG.divanChestEnabled = val;
+				if (!val) {
+					DivanDetectorSolver.clearSpots();
+				}
 				NucleusMod.CONFIG.save();
 			}).build();
-		tip(jackpotBox, "Play the wheel animation on rare drops.");
-		addRenderableWidget(jackpotBox);
+		tip(divanChestBox, "Does math to find the position\nof MoD treasure chests!");
+		addRenderableWidget(divanChestBox);
 		y += rowH;
 
-		y += 10; // room for the speed label above the field
-		speedBox = new EditBox(this.font, cx - 150, y, 145, 18, Component.literal("Animation speed"));
-		speedBox.setMaxLength(4);
-		speedBox.setValue(String.valueOf(NucleusMod.CONFIG.jackpotSpeed));
-		speedBox.setHint(Component.literal("e.g. 1.0"));
-		tip(speedBox, "How fast the animation plays.");
-		addRenderableWidget(speedBox);
-		Button testButton = Button.builder(Component.literal("Test animation"), btn -> {
-			// Out of the config first so the stage has the full screen.
-			Minecraft.getInstance().setScreen(null);
-			JackpotAnimation.startTest();
-			MadoChat.chat(Minecraft.getInstance(), Component.literal(
-				"§b[MNU] §7Spinning the wheel..."));
-		}).pos(cx + 5, y).size(145, 20).build();
-		tip(testButton, "Preview the jackpot animation.");
-		addRenderableWidget(testButton);
-		y += rowH;
-
-		// --- Trackers ---
-		catTrackersY = y;
-		y += 14;
-
-		lobbyDayBox = Checkbox.builder(Component.literal("Lobby day display"), this.font)
-			.pos(cx - 150, y).selected(NucleusMod.CONFIG.lobbyDayEnabled)
+		Checkbox divanTextBox = Checkbox.builder(Component.literal("Chest distance text"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.divanChestText)
 			.onValueChange((box, val) -> {
-				NucleusMod.CONFIG.lobbyDayEnabled = val;
+				NucleusMod.CONFIG.divanChestText = val;
 				NucleusMod.CONFIG.save();
 			}).build();
-		tip(lobbyDayBox, "Show the lobby day and time.");
-		addRenderableWidget(lobbyDayBox);
+		tip(divanTextBox, "Show distance labels on chests.");
+		addRenderableWidget(divanTextBox);
+		y += rowH;
+
+		Checkbox divanMuteBox = Checkbox.builder(Component.literal("Mute metal detector"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.divanMuteDetector)
+			.onValueChange((box, val) -> {
+				NucleusMod.CONFIG.divanMuteDetector = val;
+				NucleusMod.CONFIG.save();
+			}).build();
+		tip(divanMuteBox, "Silences the detector harp ding\nwhile the detector is held.");
+		addRenderableWidget(divanMuteBox);
 		y += rowH;
 
 		scavengerBox = Checkbox.builder(Component.literal("Scavenger tracker"), this.font)
@@ -699,6 +795,66 @@ public class MadoBrickScreen extends Screen {
 			}).build();
 		tip(scavengerBox, "Tracks your mines of divan's tool farming performence");
 		addRenderableWidget(scavengerBox);
+		y += rowH;
+
+		Button trackRateButton = Button.builder(trackRateLabel(), btn -> {
+			boolean next = !NucleusMod.CONFIG.scavengerSetsPerHour;
+			NucleusMod.CONFIG.scavengerSetsPerHour = next;
+			NucleusMod.CONFIG.save();
+			btn.setMessage(trackRateLabel());
+		}).pos(cx - 150, y).size(300, 20).build();
+		tip(trackRateButton, "Tracker rate line counts tools or full sets per hour.");
+		addRenderableWidget(trackRateButton);
+		y += rowH;
+
+		Checkbox rngdleBox = Checkbox.builder(Component.literal("RNGdle"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.rngdleEnabled)
+			.onValueChange((box, val) -> {
+				NucleusMod.CONFIG.rngdleEnabled = val;
+				NucleusMod.CONFIG.save();
+				rebuildWidgets();
+			}).build();
+		tip(rngdleBox, "Get a dopamine rush every 3 sets of tools\nto make tool grinding actually enjoyable!");
+		addRenderableWidget(rngdleBox);
+		y += rowH;
+
+		if (NucleusMod.CONFIG.rngdleEnabled) {
+			Checkbox rngdleDescBox = Checkbox.builder(Component.literal("RNGdle badge descriptions"), this.font)
+				.pos(cx - 150, y).selected(NucleusMod.CONFIG.rngdleShowDescriptions)
+				.onValueChange((box, val) -> {
+					NucleusMod.CONFIG.rngdleShowDescriptions = val;
+					NucleusMod.CONFIG.save();
+				}).build();
+			tip(rngdleDescBox, "Shows a short description under\neach badge on the RNGdle card.");
+			addRenderableWidget(rngdleDescBox);
+			y += rowH;
+
+			Checkbox rngdleShotBox = Checkbox.builder(Component.literal("RNGdle screenshot mythics"), this.font)
+				.pos(cx - 150, y).selected(NucleusMod.CONFIG.rngdleAutoScreenshot)
+				.onValueChange((box, val) -> {
+					NucleusMod.CONFIG.rngdleAutoScreenshot = val;
+					NucleusMod.CONFIG.save();
+				}).build();
+			tip(rngdleShotBox, "Saves a screenshot on top 1%\n(Mythic) RNGdle rolls.");
+			addRenderableWidget(rngdleShotBox);
+			y += rowH;
+		}
+
+		// Best-rolls board, opened from here (only when enabled).
+		if (NucleusMod.CONFIG.rngdleEnabled) {
+			Button rngdleBestButton = Button.builder(Component.literal("View best rolls"),
+				btn -> RngdleBestScreen.open(this))
+				.pos(cx - 150, y).size(300, 20).build();
+			tip(rngdleBestButton, "Top 100 RNGdle rolls with\nbadge breakdowns.");
+			addRenderableWidget(rngdleBestButton);
+			y += rowH;
+		}
+
+		divanChestColorButton = Button.builder(divanChestColorLabel(NucleusMod.CONFIG.divanChestColor),
+			btn -> cycleDivanChestColor())
+			.pos(cx - 150, y).size(300, 20).build();
+		tip(divanChestColorButton, "Change the chest box color.");
+		addRenderableWidget(divanChestColorButton);
 		y += rowH;
 
 		// --- Alerts ---
@@ -737,14 +893,6 @@ public class MadoBrickScreen extends Screen {
 			}).build();
 		tip(mobBox, "Highlights NPC's u give stuff to in Nucleus Runs");
 		addRenderableWidget(mobBox);
-		Checkbox mobWallsBox = Checkbox.builder(Component.literal("See through walls"), this.font)
-			.pos(cx + 5, y).selected(NucleusMod.CONFIG.mobHighlightWalls)
-			.onValueChange((box, val) -> {
-				NucleusMod.CONFIG.mobHighlightWalls = val;
-				NucleusMod.CONFIG.save();
-			}).build();
-		tip(mobWallsBox, "Show mob boxes through blocks.");
-		addRenderableWidget(mobWallsBox);
 		y += rowH;
 
 		Button mobClearButton = Button.builder(Component.literal("Clear markers"), btn -> {
@@ -755,9 +903,19 @@ public class MadoBrickScreen extends Screen {
 		addRenderableWidget(mobClearButton);
 		y += rowH;
 
-		// --- Bal and texts ---
+		// --- Trackers and texts ---
 		catBalY = y;
 		y += 14;
+
+		lobbyDayBox = Checkbox.builder(Component.literal("Lobby day display"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.lobbyDayEnabled)
+			.onValueChange((box, val) -> {
+				NucleusMod.CONFIG.lobbyDayEnabled = val;
+				NucleusMod.CONFIG.save();
+			}).build();
+		tip(lobbyDayBox, "Show the lobby day and time.");
+		addRenderableWidget(lobbyDayBox);
+		y += rowH;
 
 		balTimerBox = Checkbox.builder(Component.literal("Bal timer"), this.font)
 			.pos(cx - 150, y).selected(NucleusMod.CONFIG.balTimerEnabled)
@@ -785,8 +943,24 @@ public class MadoBrickScreen extends Screen {
 				NucleusMod.CONFIG.safeMode = val;
 				NucleusMod.CONFIG.save();
 			}).build();
-		tip(safeBox, "Blocks every /warp except /warp nucleus|cn.\nCatches warps fired straight from other mods.\nToggle with /mado safe.");
+		tip(safeBox, "Blocks every /warp except /warp nucleus|cn.\nToggle with /mado safe.");
 		addRenderableWidget(safeBox);
+		y += rowH;
+
+		Checkbox autoSafeBox = Checkbox.builder(Component.literal("Auto safe mode"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.autoSafeMode)
+			.onValueChange((box, val) -> {
+				NucleusMod.CONFIG.autoSafeMode = val;
+				NucleusMod.CONFIG.save();
+			}).build();
+		tip(autoSafeBox, "Turns safe mode on automatically after N\nfinished runs in the same lobby.");
+		addRenderableWidget(autoSafeBox);
+		y += rowH;
+
+		IntSlider safeRunsSlider = new IntSlider(cx - 150, y, 300, "Runs in lobby",
+			1, 20, NucleusMod.CONFIG.autoSafeModeRuns, v -> NucleusMod.CONFIG.autoSafeModeRuns = v);
+		tip(safeRunsSlider, "Finished runs in one lobby before safe\nmode switches itself on.");
+		addRenderableWidget(safeRunsSlider);
 		y += rowH;
 
 		// --- Misc ---
@@ -824,6 +998,105 @@ public class MadoBrickScreen extends Screen {
 		y += rowH + 4;
 
 		finishScrollable(Tab.FEATURES, cx, y);
+	}
+
+	private void buildGamblingTab(int cx, int startY) {
+		int y = startY;
+		int rowH = 22;
+
+		// --- Gambling ---
+		catGamblingY = y;
+		y += 14;
+
+		Checkbox gamblingBox = Checkbox.builder(Component.literal("Gambling animation"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.jackpotEnabled)
+			.onValueChange((box, val) -> {
+				NucleusMod.CONFIG.jackpotEnabled = val;
+				NucleusMod.CONFIG.save();
+			}).build();
+		tip(gamblingBox, "Play the wheel animation on rare drops.");
+		addRenderableWidget(gamblingBox);
+		y += rowH;
+
+		IntSlider speedEarlySlider = new IntSlider(cx - 150, y, 300, "First part speed",
+			50, 200, NucleusMod.CONFIG.jackpotSpeedEarlyPct, "%", v -> NucleusMod.CONFIG.jackpotSpeedEarlyPct = v);
+		tip(speedEarlySlider, "Speed of the feature text, spin-power\nand luck stages. Higher is faster.\n100% is normal speed.");
+		addRenderableWidget(speedEarlySlider);
+		y += rowH;
+
+		IntSlider speedWheelSlider = new IntSlider(cx - 150, y, 300, "Second part speed",
+			50, 200, NucleusMod.CONFIG.jackpotSpeedWheelPct, "%", v -> NucleusMod.CONFIG.jackpotSpeedWheelPct = v);
+		tip(speedWheelSlider, "Speed of the wheel spin.\nHigher is faster.\n100% is normal speed.");
+		addRenderableWidget(speedWheelSlider);
+		y += rowH;
+
+		IntSlider speedCelebSlider = new IntSlider(cx - 150, y, 300, "Third part speed",
+			50, 200, NucleusMod.CONFIG.jackpotSpeedCelebPct, "%", v -> NucleusMod.CONFIG.jackpotSpeedCelebPct = v);
+		tip(speedCelebSlider, "Speed of the celebration screen.\nHigher is faster.\n100% is normal speed.");
+		addRenderableWidget(speedCelebSlider);
+		y += rowH;
+
+		Button previewButton = Button.builder(Component.literal(
+				"Preview drop: " + JackpotAnimation.previewLabel(NucleusMod.CONFIG.jackpotPreview)), btn -> {
+			String next = JackpotAnimation.nextPreview(NucleusMod.CONFIG.jackpotPreview);
+			NucleusMod.CONFIG.jackpotPreview = next;
+			NucleusMod.CONFIG.save();
+			btn.setMessage(Component.literal(
+				"Preview drop: " + JackpotAnimation.previewLabel(next)));
+		}).pos(cx - 150, y).size(300, 20).build();
+		tip(previewButton, "Which drop the test animation shows.\nRandom gambles like the real thing.");
+		addRenderableWidget(previewButton);
+		y += rowH;
+
+		Button testButton = Button.builder(Component.literal("Test animation"), btn -> {
+			// Out of the config first so the stage has the full screen.
+			Minecraft.getInstance().setScreen(null);
+			JackpotAnimation.DropType shown =
+				JackpotAnimation.startPreview(NucleusMod.CONFIG.jackpotPreview);
+			MadoChat.chat(Minecraft.getInstance(), Component.literal(
+				"§b[MNU] §7Spinning the wheel (" + shown.displayName + ")..."));
+		}).pos(cx - 150, y).size(300, 20).build();
+		tip(testButton, "Preview the jackpot animation.");
+		addRenderableWidget(testButton);
+		y += rowH;
+
+		y += 16; // room for the odds labels above the fields (label sits 12px above box)
+		oddsJaderaldBox = oddsBox(cx - 150, y, NucleusMod.CONFIG.jackpotOddsJaderald, "Jaderald 1-in-N odds.");
+		oddsFragmentBox = oddsBox(cx + 5, y, NucleusMod.CONFIG.jackpotOddsFragment, "Divan Fragment 1-in-N odds.");
+		y += rowH;
+		y += 16; // labels for the second row sit clear of the first boxes
+		oddsMixtureBox = oddsBox(cx - 150, y, NucleusMod.CONFIG.jackpotOddsMixture, "Gemstone Mixture 1-in-N odds.");
+		oddsFlawlessBox = oddsBox(cx + 5, y, NucleusMod.CONFIG.jackpotOddsFlawless, "Flawless Gemstone 1-in-N odds.");
+		y += rowH;
+
+		IntSlider zoomSlider = new IntSlider(cx - 150, y, 300, "Zoom level",
+			0, 100, NucleusMod.CONFIG.jackpotZoomPct, "%", v -> NucleusMod.CONFIG.jackpotZoomPct = v);
+		tip(zoomSlider, "How hard the camera pushes in at the landing.\n0% turns the zoom off.");
+		addRenderableWidget(zoomSlider);
+		y += rowH;
+
+		Checkbox hideBundleBox = Checkbox.builder(Component.literal("Hide bundle"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.hideBundle)
+			.onValueChange((box, val) -> {
+				NucleusMod.CONFIG.hideBundle = val;
+				NucleusMod.CONFIG.save();
+			}).build();
+		tip(hideBundleBox, "Black 3D box over the Nucleus while\nthe wheel spins, gone at the reveal.");
+		addRenderableWidget(hideBundleBox);
+		y += rowH + 4;
+
+		finishScrollable(Tab.GAMBLING, cx, y);
+	}
+
+	/** Numeric 1-in-N field for one consolation lottery. */
+	private EditBox oddsBox(int x, int y, int initial, String tipText) {
+		EditBox box = new EditBox(this.font, x, y, 145, 18, Component.literal("1 in N"));
+		box.setMaxLength(7);
+		box.setValue(String.valueOf(initial));
+		box.setHint(Component.literal("e.g. 13"));
+		tip(box, tipText);
+		addRenderableWidget(box);
+		return box;
 	}
 
 	private void buildSoundsTab(int cx, int startY) {
@@ -864,6 +1137,18 @@ public class MadoBrickScreen extends Screen {
 			NucleusMod.CONFIG.jackpotVolume, 200, v -> NucleusMod.CONFIG.jackpotVolume = v);
 		tip(gamblingVolumeSlider, "How loud the gambling animation sounds play.\nWith the bypass above ON, MC sliders are ignored.");
 		addRenderableWidget(gamblingVolumeSlider);
+		y += rowH;
+
+		PercentSlider rngdleVolumeSlider = new PercentSlider(cx - 150, y, 300, "RNGdle dopamine volume",
+			NucleusMod.CONFIG.rngdleVolume, 200, v -> NucleusMod.CONFIG.rngdleVolume = v);
+		tip(rngdleVolumeSlider, "Reveal ticks and fanfare for the RNGdle full-set game.\n0% silences them.");
+		addRenderableWidget(rngdleVolumeSlider);
+		y += rowH;
+
+		PercentSlider achVolumeSlider = new PercentSlider(cx - 150, y, 300, "Achievement unlock volume",
+			NucleusMod.CONFIG.achievementVolume, 200, v -> NucleusMod.CONFIG.achievementVolume = v);
+		tip(achVolumeSlider, "How loud the achievement unlock jingle plays.\nWith the bypass above ON, MC sliders are ignored.\n0% silences it.");
+		addRenderableWidget(achVolumeSlider);
 		y += rowH + 10; // room for the sound label above the field
 
 		soundIdBox = new EditBox(this.font, cx - 150, y, 300, 18, Component.literal("Minecraft sound"));
@@ -1022,8 +1307,34 @@ public class MadoBrickScreen extends Screen {
 	}
 
 	private int achMaxScroll() {
-		int rows = Achievements.ALL.length + 1 + Achievements.FUN.length;
-		return Math.max(0, rows * 30 - (this.height - 150));
+		int rows = 0;
+		for (Achievements.Entry e : Achievements.ENTRIES) {
+			boolean isDone = NucleusMod.SPEEDRUN.unlockedFun.contains(e.id());
+			if (achFilter == -2 && !isDone) {
+				continue;
+			}
+			if (achFilter == -3 && isDone) {
+				continue;
+			}
+			if (achFilter < 0 || e.tier() == achFilter) {
+				rows++;
+			}
+		}
+		return Math.max(0, rows * ACH_ROW_H - (this.height - 60 - 104));
+	}
+
+	/** Countdown to the next UTC midnight, when the daily hint refreshes. */
+	private static String hintCountdown() {
+		long ms = 86400000L - (System.currentTimeMillis() % 86400000L);
+		long h = ms / 3600000L;
+		long m = (ms % 3600000L) / 60000L;
+		if (h > 0) {
+			return "hint in " + h + "h " + m + "m";
+		}
+		if (m > 0) {
+			return "hint in " + m + "m";
+		}
+		return "hint in " + Math.max(1L, ms / 1000L) + "s";
 	}
 
 	private Component keybindLabel() {
@@ -1142,14 +1453,12 @@ public class MadoBrickScreen extends Screen {
 		} else if (currentTab == Tab.FEATURES) {
 			int viewportBottom = moreViewportBottom();
 			if (catBalY >= 0) {
-				drawMoreHeader(gfx, "— Bal and texts —", catBalY, viewportBottom);
+				drawMoreHeader(gfx, "— Trackers and texts —", catBalY, viewportBottom);
 			}
-			if (catGamblingY >= 0) {
-				drawMoreHeader(gfx, "— Gambling —", catGamblingY, viewportBottom);
+			if (catMinesY >= 0) {
+				drawMoreHeader(gfx, "— Mines of Divan —", catMinesY, viewportBottom);
 			}
-			if (catTrackersY >= 0) {
-				drawMoreHeader(gfx, "— Trackers —", catTrackersY, viewportBottom);
-			}
+			drawButtonPreview(gfx, divanChestColorButton, NucleusMod.CONFIG.divanChestColor);
 			if (catAlertsY >= 0) {
 				drawMoreHeader(gfx, "— Alerts —", catAlertsY, viewportBottom);
 			}
@@ -1162,9 +1471,18 @@ public class MadoBrickScreen extends Screen {
 			if (catMiscY >= 0) {
 				drawMoreHeader(gfx, "— Misc —", catMiscY, viewportBottom);
 			}
-			if (speedBox != null && speedBox.visible) {
-				gfx.text(this.font, "Animation speed (0.5-2.0)", speedBox.getX(), speedBox.getY() - 12, 0xFFFFFFFF, true);
+			if (moreMaxScroll > 0 && moreScroll < moreMaxScroll) {
+				gfx.centeredText(this.font, "scroll for more ▼", this.width / 2, this.height - 52, 0xFF555555);
 			}
+		} else if (currentTab == Tab.GAMBLING) {
+			int viewportBottom = moreViewportBottom();
+			if (catGamblingY >= 0) {
+				drawMoreHeader(gfx, "— Gambling —", catGamblingY, viewportBottom);
+			}
+			oddsLabel(gfx, oddsJaderaldBox, "Jaderald 1 in");
+			oddsLabel(gfx, oddsFragmentBox, "Fragment 1 in");
+			oddsLabel(gfx, oddsMixtureBox, "Mixture 1 in");
+			oddsLabel(gfx, oddsFlawlessBox, "Flawless 1 in");
 			if (moreMaxScroll > 0 && moreScroll < moreMaxScroll) {
 				gfx.centeredText(this.font, "scroll for more ▼", this.width / 2, this.height - 52, 0xFF555555);
 			}
@@ -1184,99 +1502,156 @@ public class MadoBrickScreen extends Screen {
 		}
 	}
 
-	/** Achievements tab: every name always visible (gray when locked); hovering an UNLOCKED row shows a floating how-to. */
-	private void drawAchievementsTab(GuiGraphicsExtractor gfx, int mouseX, int mouseY) {
-		record Row(Component name, String sub, String desc, boolean unlocked) {
-		}
-		java.util.List<Row> rows = new java.util.ArrayList<>();
-		for (Achievements.Def def : Achievements.ALL) {
-			int tier = Achievements.unlockedTier(def.id());
-			if (tier < 0) {
-				rows.add(new Row(Component.literal(def.name()).withColor(0x808080),
-					Achievements.progressText(def), "", false));
-			} else {
-				rows.add(new Row(
-					Component.literal(def.name() + " [" + Achievements.TIER_NAMES[tier] + "]")
-						.withColor(Achievements.TIER_COLORS[tier] & 0xFFFFFF),
-					Achievements.progressText(def), Achievements.tierDesc(def), true));
-			}
-		}
-		int gTier = Achievements.gamblerTier();
-		if (gTier < 0) {
-			rows.add(new Row(Component.literal("Pro Gambler").withColor(0x808080),
-				Achievements.gamblerProgressText(), "", false));
-		} else {
-			rows.add(new Row(
-				Component.literal("Pro Gambler [" + Achievements.TIER_NAMES[gTier] + "]")
-					.withColor(Achievements.TIER_COLORS[gTier] & 0xFFFFFF),
-				Achievements.gamblerProgressText(), Achievements.gamblerDesc(), true));
-		}
-		for (Achievements.FunDef fun : Achievements.FUN) {
-			if (NucleusMod.SPEEDRUN.unlockedFun.contains(fun.id())) {
-				rows.add(new Row(Component.literal(fun.name()).withColor(0xFFD700),
-					"unlocked", Achievements.funDesc(fun.id()), true));
-			} else {
-				rows.add(new Row(Component.literal(fun.name()).withColor(0x808080),
-					"locked", "", false));
-			}
-		}
+	/** One achievements card: entry + live unlocked state. */
+	private record AchRow(Achievements.Entry e, boolean done, Component name, String sub,
+		boolean showDesc, boolean showHint, float nameScale) {
+	}
 
-		int y = 64;
-		gfx.centeredText(this.font, "Achievements", this.width / 2, y, 0xFFFFD700);
-		y += 16;
-		int viewTop = y;
-		int viewBottom = this.height - 60;
-		y -= achScroll;
-		int cx = this.width / 2;
-		Row hovered = null;
-		for (Row row : rows) {
-			if (y > viewBottom) {
-				break;
+	private static final int ACH_ROW_H = 64;
+
+	/** Filtered rows: completed first, then easiest tier to hardest inside each group. */
+	private java.util.List<AchRow> achRows() {
+		java.util.List<AchRow> done = new java.util.ArrayList<>();
+		java.util.List<AchRow> todo = new java.util.ArrayList<>();
+		for (Achievements.Entry e : Achievements.ENTRIES) {
+			boolean isDone = NucleusMod.SPEEDRUN.unlockedFun.contains(e.id());
+			if (achFilter == -2 && !isDone) {
+				continue;
 			}
-			int rowTop = y;
-			if (rowTop + 30 >= viewTop) {
-				gfx.centeredText(this.font, row.name(), cx, y, 0xFFFFFFFF);
+			if (achFilter == -3 && isDone) {
+				continue;
 			}
-			y += 11;
-			if (y >= viewTop - 10 && y <= viewBottom) {
-				gfx.centeredText(this.font, row.sub(), cx, y, 0xFFAAAAAA);
+			if (achFilter >= 0 && e.tier() != achFilter) {
+				continue;
 			}
-			y += 11;
-			// Hover is detected here but drawn later as a floating box, so
-			// rows never move. Locked rows have no description to show.
-			if (row.unlocked() && !row.desc().isEmpty()
-				&& mouseX >= cx - 170 && mouseX <= cx + 170
-				&& mouseY >= y - 22 && mouseY <= y) {
-				hovered = row;
-			}
-			y += 8;
+			Component name = isDone ? Achievements.titleComponent(e, false)
+				: Achievements.lockedTitleComponent(e);
+			boolean revealed = NucleusMod.SPEEDRUN.revealedHints.contains(e.id());
+			AchRow row = new AchRow(e, isDone, name, Achievements.progressText(e),
+				isDone || revealed, !isDone && !revealed, isDone ? 1.3f : 1.15f);
+			(isDone ? done : todo).add(row);
 		}
-		if (hovered != null) {
-			drawAchTooltip(gfx, hovered.name(), hovered.desc(), mouseX, mouseY);
+		java.util.Comparator<AchRow> byTier =
+			java.util.Comparator.comparingInt(r -> r.e().tier());
+		done.sort(byTier);
+		todo.sort(byTier);
+		done.addAll(todo);
+		return done;
+	}
+
+	private int achCardWidth(java.util.List<AchRow> rows) {
+		int w = 200;
+		for (AchRow r : rows) {
+			int nw;
+			try {
+				nw = (int) (this.font.width(r.name().getString()) * r.nameScale());
+			} catch (Exception ignored) {
+				nw = 200;
+			}
+			w = Math.max(w, nw);
+			w = Math.max(w, this.font.width(r.sub()));
+			w = Math.max(w, this.font.width(r.showDesc() ? r.e().desc() : "hint in 23h 59m"));
+		}
+		return Math.min(Math.max(w + 28, 200), Math.max(200, this.width - 32));
+	}
+
+	private static long hintTodayUtc() {
+		return System.currentTimeMillis() / 86400000L;
+	}
+
+	private static boolean hintAvailable() {
+		return NucleusMod.SPEEDRUN.hintDay != hintTodayUtc();
+	}
+
+	/** Achievements tab: boxed cards, 3 rows each (big name, progress, requirement/hint). */
+	private void drawAchievementsTab(GuiGraphicsExtractor gfx, int mouseX, int mouseY) {
+		java.util.List<AchRow> rows = achRows();
+		int cx = this.width / 2;
+		gfx.centeredText(this.font, "Achievements", cx, 60, 0xFFFFD700);
+		// Invisible mask: scissored viewport, so scrolled cards clip exactly
+		// at these lines and can never touch the filter button or Done row.
+		int viewTop = 104;
+		int viewBottom = this.height - 60;
+		if (achScroll > achMaxScroll()) {
+			achScroll = achMaxScroll();
+		}
+		int bw = achCardWidth(rows);
+		int y = viewTop - achScroll;
+		gfx.enableScissor(0, viewTop, this.width, viewBottom);
+		try {
+			for (AchRow row : rows) {
+				int rowTop = y;
+				if (rowTop > viewBottom) {
+					break;
+				}
+				drawAchCard(gfx, row, cx, rowTop, bw);
+				y += ACH_ROW_H;
+			}
+		} finally {
+			gfx.disableScissor();
+		}
+		if (achMaxScroll() > 0) {
+			gfx.centeredText(this.font, "scroll for more ▼", cx, this.height - 52, 0xFF555555);
 		}
 	}
 
-	/** Floating how-to box near the cursor (never shifts rows). */
-	private void drawAchTooltip(GuiGraphicsExtractor gfx, Component name, String desc, int mouseX, int mouseY) {
-		java.util.List<net.minecraft.util.FormattedCharSequence> lines =
-			this.font.split(Component.literal("§f" + desc), 200);
-		int w = this.font.width(name.getString()) + 12;
-		for (var seq : lines) {
-			w = Math.max(w, this.font.width(seq) + 12);
+	/** One boxed card: dim fill, tier outline when done, gray when locked. */
+	private void drawAchCard(GuiGraphicsExtractor gfx, AchRow row, int cx, int rowTop, int bw) {
+		int x1 = cx - bw / 2;
+		int y2 = rowTop + ACH_ROW_H - 4;
+		int outline = row.done() ? Achievements.TIER_COLORS[row.e().tier()] | 0xFF000000 : 0xFF808080;
+		gfx.fill(x1, rowTop, x1 + bw, y2, 0xB0000000);
+		gfx.fill(x1, rowTop, x1 + bw, rowTop + 1, outline);
+		gfx.fill(x1, y2 - 1, x1 + bw, y2, outline);
+		gfx.fill(x1, rowTop, x1 + 1, y2, outline);
+		gfx.fill(x1 + bw - 1, rowTop, x1 + bw, y2, outline);
+		var pose = gfx.pose();
+		pose.pushMatrix();
+		try {
+			pose.translate((float) cx, (float) rowTop + 12.0f);
+			pose.scale(row.nameScale(), row.nameScale());
+			gfx.centeredText(this.font, row.name(), 0, -4, 0xFFFFFFFF);
+		} finally {
+			pose.popMatrix();
 		}
-		int h = 12 + lines.size() * 10 + 8;
-		int x = Math.min(mouseX + 12, this.width - w - 4);
-		int yy = Math.min(mouseY + 8, this.height - h - 44);
-		if (yy < 50) {
-			yy = 50;
+		gfx.centeredText(this.font, row.sub(), cx, rowTop + 30, 0xFFAAAAAA);
+		if (row.showDesc()) {
+			gfx.centeredText(this.font, row.e().desc(), cx, rowTop + 44, 0xFF777777);
+		} else if (row.showHint()) {
+			boolean avail = hintAvailable();
+			int hc = avail ? 0xFFFFFF55 : 0xFF666666;
+			String label = avail ? "need a hint?" : hintCountdown();
+			gfx.fill(cx - 60, rowTop + 40, cx + 60, rowTop + 52, avail ? 0xFF222222 : 0xFF181818);
+			gfx.centeredText(this.font, label, cx, rowTop + 42, hc);
 		}
-		gfx.fill(x, yy, x + w, yy + h, 0xF0101018);
-		gfx.text(this.font, name.getString(), x + 6, yy + 5, 0xFFFFD700, true);
-		int ly = yy + 17;
-		for (var seq : lines) {
-			gfx.text(this.font, seq, x + 6, ly, 0xFFFFFFFF, true);
-			ly += 10;
+	}
+
+	/** Hint-button clicks (locked, unrevealed cards only; one hint per real day). */
+	private boolean tryAchHintClick(double mx, double my) {
+		java.util.List<AchRow> rows = achRows();
+		int cx = this.width / 2;
+		int y = 104 - achScroll;
+		for (AchRow row : rows) {
+			if (row.showHint() && my >= y + 40 && my <= y + 52 && mx >= cx - 60 && mx <= cx + 60) {
+				if (!hintAvailable()) {
+					return true;
+				}
+				NucleusMod.SPEEDRUN.revealedHints.add(row.e().id());
+				NucleusMod.SPEEDRUN.hintDay = hintTodayUtc();
+				NucleusMod.SPEEDRUN.save();
+				return true;
+			}
+			y += ACH_ROW_H;
 		}
+		return false;
+	}
+
+	@Override
+	public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent event, boolean doubled) {
+		if (currentTab == Tab.ACHIEVEMENTS && tryAchHintClick(event.x(), event.y())) {
+			return true;
+		}
+		return super.mouseClicked(event, doubled);
 	}
 
 	/** Category header that scrolls with More content (hidden off-viewport). */
@@ -1299,6 +1674,18 @@ public class MadoBrickScreen extends Screen {
 		gfx.fill(x1, y1, x2, y2, color);
 	}
 
+	/** Parses a 1-in-N odds field, falling back on bad input. */
+	private static int parseOdds(String raw, int fallback) {
+		try {
+			int v = Integer.parseInt(raw.trim());
+			if (v >= 1 && v <= 1000000) {
+				return v;
+			}
+		} catch (NumberFormatException ignored) {
+		}
+		return fallback;
+	}
+
 	private void saveAndClose() {
 		try {
 			if (outlineBox != null) {
@@ -1310,11 +1697,21 @@ public class MadoBrickScreen extends Screen {
 		} catch (NumberFormatException ignored) {
 		}
 		try {
-			if (speedBox != null) {
-				float s = Float.parseFloat(speedBox.getValue().trim());
-				if (s >= 0.5f && s <= 2.0f) {
-					NucleusMod.CONFIG.jackpotSpeed = s;
-				}
+			if (oddsJaderaldBox != null) {
+				NucleusMod.CONFIG.jackpotOddsJaderald = parseOdds(oddsJaderaldBox.getValue(),
+					NucleusMod.CONFIG.jackpotOddsJaderald);
+			}
+			if (oddsFragmentBox != null) {
+				NucleusMod.CONFIG.jackpotOddsFragment = parseOdds(oddsFragmentBox.getValue(),
+					NucleusMod.CONFIG.jackpotOddsFragment);
+			}
+			if (oddsMixtureBox != null) {
+				NucleusMod.CONFIG.jackpotOddsMixture = parseOdds(oddsMixtureBox.getValue(),
+					NucleusMod.CONFIG.jackpotOddsMixture);
+			}
+			if (oddsFlawlessBox != null) {
+				NucleusMod.CONFIG.jackpotOddsFlawless = parseOdds(oddsFlawlessBox.getValue(),
+					NucleusMod.CONFIG.jackpotOddsFlawless);
 			}
 		} catch (NumberFormatException ignored) {
 		}

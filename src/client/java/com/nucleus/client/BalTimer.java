@@ -23,6 +23,7 @@ public final class BalTimer {
 
 	private static long endAtMillis = 0L;
 	private static long lastStartAt = 0L;
+	private static long readyAtMillis = 0L;
 	private static boolean running = false;
 	private static boolean ready = false;
 
@@ -32,6 +33,7 @@ public final class BalTimer {
 	public static synchronized void reset() {
 		endAtMillis = 0L;
 		lastStartAt = 0L;
+		readyAtMillis = 0L;
 		running = false;
 		ready = false;
 	}
@@ -67,6 +69,7 @@ public final class BalTimer {
 		}
 		endAtMillis = now + DURATION_MILLIS;
 		lastStartAt = now;
+		readyAtMillis = 0L;
 		running = true;
 		ready = false;
 		NucleusMod.LOGGER.info("Bal timer started (60s)");
@@ -96,15 +99,28 @@ public final class BalTimer {
 		return m + ":" + String.format("%02d", s);
 	}
 
-	/** HUD/move-screen text: countdown while running, READY after finishing. */
+	/** Seconds since READY (overflow), floored. */
+	public static synchronized long overflowSeconds() {
+		if (!ready || readyAtMillis <= 0L) {
+			return 0L;
+		}
+		return Math.max(0L, (System.currentTimeMillis() - readyAtMillis) / 1000L);
+	}
+
+	private static String formatOverflow() {
+		long totalSec = overflowSeconds();
+		return (totalSec / 60L) + ":" + String.format("%02d", totalSec % 60L);
+	}
+
+	/** HUD/move-screen text: countdown while running, READY + overflow after finishing. */
 	public static String displayString() {
 		if (isRunning()) {
 			return "Bal: " + formatRemaining();
 		}
 		if (isReady()) {
-			return "Bal: READY";
+			return "Bal: READY (" + formatOverflow() + ")";
 		}
-		return "Bal: 1:00";
+		return "Bal: ???";
 	}
 
 	public static int displayColor() {
@@ -120,11 +136,14 @@ public final class BalTimer {
 	public static void tick(Minecraft client) {
 		boolean finished = false;
 		synchronized (BalTimer.class) {
-			if (running && System.currentTimeMillis() >= endAtMillis) {
-				running = false;
-				ready = true;
-				endAtMillis = 0L;
-				finished = true;
+			if (running) {
+				if (System.currentTimeMillis() >= endAtMillis) {
+					running = false;
+					ready = true;
+					endAtMillis = 0L;
+					readyAtMillis = System.currentTimeMillis();
+					finished = true;
+				}
 			}
 		}
 		if (finished) {

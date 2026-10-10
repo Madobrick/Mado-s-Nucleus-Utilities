@@ -1,5 +1,6 @@
 package com.nucleus.client;
 
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -13,7 +14,10 @@ import com.nucleus.client.JackpotAnimation.DropType;
  * as a {@code CRYSTAL NUCLEUS LOOT BUNDLE} block listing each item on its
  * own 4-space-indented line, closed by a {@code ▬} divider. That is how the
  * drops are known before pickup — there is no RARE DROP line for them. Every
- * indented loot line is therefore item-checked for all three drops.</li>
+ * indented loot line is therefore item-checked for all three drops.
+ * Jaderalds, Divan Fragments, Gemstone Mixtures and Flawless gemstones
+ * from the same block feed a consolation lottery instead (1/13, 1/26,
+ * 1/13 and 1/2 per line).</li>
  * <li>{@code RareDropMessages.kt} + loot trackers — kept only as a backup
  * net: if Hypixel ever announces one of our items via {@code RARE DROP!},
  * {@code CRAZY RARE DROP!}, {@code VERY RARE DROP!} etc., that fires too.</li>
@@ -33,6 +37,7 @@ public final class JackpotDetector {
 		inBundleLoop = false;
 		bundleLoopStart = 0L;
 		bundleJaderalds = 0;
+		Achievements.resetBundle();
 	}
 
 	public static DropType matchAnnouncement(String colorlessNorm) {
@@ -99,18 +104,25 @@ public final class JackpotDetector {
 		// Bundle block start: "  CRYSTAL NUCLEUS LOOT BUNDLE" (tracked for
 		// SkyHanni parity; matching below does not depend on it).
 		if (trimmed.startsWith("crystal nucleus loot bundle")) {
+			Achievements.closeBundle();
+			Achievements.openBundle();
 			inBundleLoop = true;
 			bundleLoopStart = System.currentTimeMillis();
 			bundleJaderalds = 0;
+			// Run history keeps the latest bundle only: a new block wipes
+			// whatever the previous one collected.
+			SpeedrunManager.noteBundleBlockStart();
 			return;
 		}
 		if (inBundleLoop) {
 			if (System.currentTimeMillis() - bundleLoopStart > BUNDLE_LOOP_TIMEOUT_MS) {
 				inBundleLoop = false;
 				bundleJaderalds = 0;
+				Achievements.closeBundle();
 			} else if (isDividerLine(trimmed)) {
 				inBundleLoop = false;
 				bundleJaderalds = 0;
+				Achievements.closeBundle();
 				return;
 			}
 		}
@@ -126,19 +138,57 @@ public final class JackpotDetector {
 			Achievements.unlockFun("terraria");
 		}
 
+		// Streak sightings (b2b achievements): framed bundle lines only, so
+		// player chat can never stuff them. Animation toggle aside on purpose.
+		if (raw.startsWith("    ") && inBundleLoop
+			&& System.currentTimeMillis() - bundleLoopStart <= BUNDLE_LOOP_TIMEOUT_MS) {
+			Achievements.recordBundleItem(norm(raw));
+		}
+
 		if (!NucleusMod.CONFIG.jackpotEnabled) {
 			return;
 		}
 
-		// Every drop is detected like the Alloy: Hypixel lists loot items on
-		// their own 4-space-indented lines (nucleus bundle, corpses, bosses).
-		// Any such line naming our items fires, announcement or not.
-		// Indented lines are certainly ours (own bundle/loot).
+		// Every drop is detected like the Alloy: the Crystal Nucleus loot
+		// bundle lists items on their own 4-space-indented lines. Wheel
+		// spins AND their achievements ONLY come from inside that block
+		// (other loot sources — vanguard keys, corpses, bosses — indent
+		// too but must never fire them).
 		if (raw.startsWith("    ")) {
 			String n = norm(raw);
+			if (!inBundleLoop) {
+				return;
+			}
+			// Run history: every framed loot line, verbatim (amounts included).
+			SpeedrunManager.noteBundleLoot(HollowsDetector.stripFormatting(raw).trim());
 			DropType t = matchItem(n);
 			if (t != null) {
 				JackpotAnimation.start(t);
+			}
+			// Consolation lottery on common bundle loot (once per loot
+			// line — each item prints on its own stacked line). Odds are
+			// configurable 1-in-N in the Gambling tab.
+			if (n.contains("jaderald")) {
+				if (rollOdds(NucleusMod.CONFIG.jackpotOddsJaderald)) {
+					JackpotAnimation.start(DropType.JADERALD);
+				}
+			}
+			if (n.contains("divan fragment")) {
+				if (rollOdds(NucleusMod.CONFIG.jackpotOddsFragment)) {
+					JackpotAnimation.start(DropType.DIVAN_FRAGMENT);
+				}
+			}
+			if (n.contains("gemstone mixture")) {
+				if (rollOdds(NucleusMod.CONFIG.jackpotOddsMixture)) {
+					JackpotAnimation.start(DropType.GEMSTONE_MIXTURE);
+				}
+			}
+			if (n.contains("flawless")) {
+				String[] parsed = flawlessParts(n);
+				JackpotAnimation.setFlawless(parsed[0], parsed[1]);
+				if (rollOdds(NucleusMod.CONFIG.jackpotOddsFlawless)) {
+					JackpotAnimation.start(DropType.FLAWLESS_GEMSTONE);
+				}
 			}
 			String g = matchGamblerItem(n);
 			if (g != null) {
@@ -183,6 +233,26 @@ public final class JackpotDetector {
 
 	private static final Pattern LEADING_AMOUNT = Pattern.compile("^(\\d+)\\s*x\\b");
 	private static final Pattern TRAILING_AMOUNT = Pattern.compile("\\bx\\s*(\\d+)$");
+	private static final Pattern FLAWLESS_GEM = Pattern.compile("flawless ([a-z]+)");
+
+	/** 1-in-N roll from a config odds value (clamped sane). */
+	private static boolean rollOdds(int oneInN) {
+		int n = Math.min(1000000, Math.max(1, oneInN));
+		return ThreadLocalRandom.current().nextInt(n) == 0;
+	}
+
+	/** "flawless ruby x2" -> {"Flawless Ruby", "ruby"} for totem + model id. */
+	private static String[] flawlessParts(String colorlessNorm) {
+		Matcher m = FLAWLESS_GEM.matcher(colorlessNorm);
+		if (m.find()) {
+			String gem = m.group(1);
+			if (!gem.isBlank() && !gem.equals("gemstone")) {
+				return new String[] {
+					"Flawless " + Character.toUpperCase(gem.charAt(0)) + gem.substring(1), gem };
+			}
+		}
+		return new String[] { "Flawless Gemstone", "ruby" };
+	}
 
 	/** Stack size on a bundle loot line ("2x Jaderald" or "Jaderald x2", else 1). */
 	private static int lootAmount(String colorlessNorm) {

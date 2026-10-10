@@ -27,11 +27,11 @@ Yes — verify it yourself instead of trusting me:
 
 ## Features
 
-- **Waypoints tab** — Jungle Temple highlights: **Automatic** (finds both Door Guardians, places from the higher-X one's feet) or **Manual** (hotkey capture); custom waypoints (up to 100) anywhere in the Hollows.
-- **Features tab** — Bal respawn timer, gambling animation for Divan's Alloy / Quick Claw / Jade Dye (detected the way SkyHanni does), lobby-day + scavenger trackers, wrong-pet / low-tools alerts, NPC highlights (Yolkar, Robot, Keepers, both Door Guardians; cleared per lobby).
+- **Waypoints tab** — Jungle Temple highlights: **Automatic** (finds both Door Guardians, places from the higher-X one's feet) or **Manual** (hotkey capture); custom waypoints (up to 100) anywhere in the Hollows; optional dimming past etherwarp range (61 blocks).
+- **Features tab** — Bal respawn timer, gambling animation for Divan's Alloy / Quick Claw / Jade Dye (detected the way SkyHanni does), lobby-day + scavenger trackers, Divan chest locator, RNGdle full-set number game, wrong-pet / low-tools alerts, NPC highlights (Yolkar, Robot, Keepers, both Door Guardians; cleared per lobby).
 - **Sounds tab** — objective sounds (any Minecraft sound id or your own `.wav`, volume 0–200%, optional OS-mixer bypass, per-trigger toggles, gambling volume).
 - **Speedruns tab** — crystal-run timer with auto splits, bests + trimmed averages in `config/nucleus/speedrun.json`.
-- **Achievements tab** — tiered (Nucleus Runner, Speedrunner, Pro Gambler) and hidden fun achievements, all earned locally.
+- **Achievements tab** — 52 flat achievements across six difficulties (Easy → Impossible), all earned locally.
 
 ## Requirements
 

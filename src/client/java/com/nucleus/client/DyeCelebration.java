@@ -69,6 +69,11 @@ public final class DyeCelebration {
 	 * cyan dye so celebrations always show something.
 	 */
 	public static ItemStack head(String textureHash, String uuid, String displayName, boolean slim) {
+		if (textureHash == null || !textureHash.matches("[0-9a-f]{64}")) {
+			NucleusMod.LOGGER.warn("Bad head texture hash '{}' for '{}', dye fallback in use",
+				textureHash, displayName);
+			return new ItemStack(Items.CYAN_DYE);
+		}
 		try {
 			String json = "{\"textures\":{\"SKIN\":{\"url\":\"http://textures.minecraft.net/texture/"
 				+ textureHash + "\""

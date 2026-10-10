@@ -5,13 +5,19 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import net.minecraft.client.Minecraft;
+import com.nucleus.NucleusMod;
 
 /**
  * Tracks which of the five crystals (amber, sapphire, jade, amethyst,
- * topaz) were picked up this lobby. The obtain SOUND fires only on the
- * CRYSTAL FOUND (x/5) title counter going up — chat mentions and title
- * names only mark the set, never chime.
+ * topaz) were picked up this lobby. The obtain SOUND fires only on a
+ * "crystal found" x/5 counter going up — whether it arrives as a title
+ * packet or as the "✦ CRYSTAL FOUND (x/5)" chat block (Hypixel sends the
+ * latter; both feed the same counter). Chat mentions and title names only
+ * mark the set, never chime.
+ *
+ * <p>Note: there is no CRYSTAL PLACED title — placements arrive only as
+ * "You placed the X Crystal!" chat lines, handled by
+ * {@link SpeedrunManager}.
  */
 public final class CrystalTracker {
 	private CrystalTracker() {
@@ -21,18 +27,15 @@ public final class CrystalTracker {
 
 	private static final Set<String> obtained = new HashSet<>();
 
-	private static final Pattern FOUND_COUNT = Pattern.compile("crystal found \\((\\d)/5\\)");
-	private static final Pattern PLACED_COUNT = Pattern.compile("crystal placed \\((\\d)/5\\)");
+	private static final Pattern ANY_COUNT = Pattern.compile("(\\d)\\s*/\\s*5");
 
-	private static int foundCount = 0;
-	private static int lastFoundX = -1;
-	/** Latched when the FOUND counter hits 5/5 (names alone can't prove it). */
+	/** Latched when 5/5 is seen (names alone can't prove it). */
 	private static boolean foundAll = false;
+	/** Crystal-titled texts already logged as unmatched (keeps the log quiet). */
+	private static final Set<String> loggedMisses = new HashSet<>();
 
 	public static void reset() {
 		obtained.clear();
-		foundCount = 0;
-		lastFoundX = -1;
 		foundAll = false;
 	}
 
@@ -42,46 +45,28 @@ public final class CrystalTracker {
 	}
 
 	/**
-	 * Title/subtitle packets: the big "CRYSTAL FOUND (x/5) — Name Crystal"
-	 * screen (and its CRYSTAL PLACED twin). The counter is the source of
-	 * truth: any increase chimes exactly once, duplicates (same x twice)
-	 * stay silent, and 5/5 resets for the next run.
+	 * Title/subtitle packets: anything reading "crystal found" with an x/5
+	 * counter ("CRYSTAL FOUND (1/5)", "Crystal Found! (2/5)", subtitle
+	 * variants — punctuation tolerant) chimes on sight; same-tick doubles
+	 * collapse in the per-trigger sound debounce. Unmatched crystal titles log once
+	 * so a wording change shows up in latest.log.
 	 */
 	public static void onTitleText(String raw) {
 		if (raw == null) {
 			return;
 		}
 		String norm = HollowsDetector.stripFormatting(raw).toLowerCase();
-		Matcher fm = FOUND_COUNT.matcher(norm);
-		if (fm.find()) {
-			int x;
-			try {
-				x = Integer.parseInt(fm.group(1));
-			} catch (NumberFormatException ignored) {
-				x = -1;
-			}
-			if (x >= 1 && x <= 5 && x != lastFoundX) {
-				lastFoundX = x;
-				ObjectiveSounds.onObjective(ObjectiveSounds.Trigger.CRYSTAL);
-				if (x >= 5) {
-					foundAll = true;
-					foundCount = 0;
-				} else {
-					foundCount = x;
-				}
-			}
+		if (!norm.contains("crystal")) {
+			return;
 		}
-		Matcher pm = PLACED_COUNT.matcher(norm);
-		if (pm.find()) {
-			int x;
+		Matcher cm = ANY_COUNT.matcher(norm);
+		if (norm.contains("found") && cm.find()) {
 			try {
-				x = Integer.parseInt(pm.group(1));
+				onFoundCounter(Integer.parseInt(cm.group(1)));
 			} catch (NumberFormatException ignored) {
-				x = -1;
 			}
-			if (x >= 1 && x <= 5) {
-				SpeedrunManager.onPlacedTitle(Minecraft.getInstance(), x);
-			}
+		} else if (loggedMisses.size() < 20 && loggedMisses.add(norm)) {
+			NucleusMod.LOGGER.info("Crystal title without found-counter: '{}'", norm);
 		}
 		for (String c : CRYSTALS) {
 			if (norm.contains(c + " crystal")) {
@@ -100,6 +85,16 @@ public final class CrystalTracker {
 		if (ChatLines.isPlayerChat(norm)) {
 			return;
 		}
+		// The pickup block ("✦ CRYSTAL FOUND (x/5)") arrives as plain
+		// chat: same counter, same chime. lastFoundX keeps a simultaneous
+		// title packet from double-chiming.
+		Matcher cm = ANY_COUNT.matcher(norm);
+		if (norm.contains("found") && norm.contains("crystal") && cm.find()) {
+			try {
+				onFoundCounter(Integer.parseInt(cm.group(1)));
+			} catch (NumberFormatException ignored) {
+			}
+		}
 		// Mark only — but never placements: holding-to-place is not picking
 		// up, and it must not trip the pet alert. The counter owns that.
 		if (norm.contains("you placed the")) {
@@ -109,6 +104,16 @@ public final class CrystalTracker {
 			if (norm.contains(c + " crystal")) {
 				obtained.add(c);
 				return;
+			}
+		}
+	}
+
+	/** Every sighting chimes; back-to-back doubles collapse in the per-trigger 700ms debounce. */
+	private static void onFoundCounter(int x) {
+		if (x >= 1 && x <= 5) {
+			ObjectiveSounds.onObjective(ObjectiveSounds.Trigger.CRYSTAL);
+			if (x >= 5) {
+				foundAll = true;
 			}
 		}
 	}

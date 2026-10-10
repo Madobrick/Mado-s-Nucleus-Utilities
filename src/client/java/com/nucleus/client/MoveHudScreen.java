@@ -120,9 +120,9 @@ public class MoveHudScreen extends Screen {
 			new String[] {
 				"Tools: " + Scavenger.toolEvents() + " (" + String.format("%.1f", Scavenger.toolsPerHour()) + "/h)",
 				"Avg full set: " + fmtLong(Scavenger.avgSetMs()),
-				"Sets: " + Scavenger.setsCompleted()
+				"Avg find chest: " + fmtDecimal(DivanDetectorSolver.avgFindMs())
 			},
-			new int[] { 0xFFFFFFFF, 0xFF55FF55, 0xFFAAAAAA },
+			new int[] { 0xFFFFFFFF, 0xFF55FF55, 0xFFFFFF55 },
 			HudText.ones(3),
 			NucleusMod.CONFIG.scavengerX, NucleusMod.CONFIG.scavengerY,
 			clampScale(NucleusMod.CONFIG.scavengerScale),
@@ -130,6 +130,37 @@ public class MoveHudScreen extends Screen {
 				NucleusMod.CONFIG.scavengerX = entries.get(3).x;
 				NucleusMod.CONFIG.scavengerY = entries.get(3).y;
 				NucleusMod.CONFIG.scavengerScale = entries.get(3).scale;
+			}));
+		entries.add(new Entry("Divan chest",
+			new String[] { "Divan chest: 12m", "690, 69, 566" },
+			new int[] { 0xFF55FF55, 0xFFAAAAAA },
+			HudText.ones(2),
+			NucleusMod.CONFIG.divanChestHudX, NucleusMod.CONFIG.divanChestHudY,
+			clampScale(NucleusMod.CONFIG.divanChestHudScale),
+			() -> {
+				NucleusMod.CONFIG.divanChestHudX = entries.get(4).x;
+				NucleusMod.CONFIG.divanChestHudY = entries.get(4).y;
+				NucleusMod.CONFIG.divanChestHudScale = entries.get(4).scale;
+			}));
+		float rngScale = clampScale(NucleusMod.CONFIG.rngdleHudScale);
+		String[] rngLines = new String[] {
+			"RNGDLE", "482,913", "Rare 12,000 EP", "Top 8%", "- Even +200", "Best today: 482,913 (Rare)"
+		};
+		int rngX = NucleusMod.CONFIG.rngdleHudX;
+		int rngY = NucleusMod.CONFIG.rngdleHudY;
+		if (rngX < 0 || rngY < 0) {
+			float pw = (HudText.width(this.font, rngLines, HudText.ones(6)) + PAD * 2) * rngScale;
+			float ph = (HudText.contentHeight(rngLines, HudText.ones(6)) - 1 + PAD * 2) * rngScale;
+			rngX = (int) Math.max(0, this.width / 2f - pw / 2f);
+			rngY = (int) Math.max(0, this.height * 0.38f - ph / 2f);
+		}
+		entries.add(new Entry("RNGdle", rngLines,
+			new int[] { 0xFFFFD700, 0xFFFFFFFF, 0x5555FF, 0xFFAAAAAA, 0xFFFFFFFF, 0xFF777777 },
+			HudText.ones(6), rngX, rngY, rngScale,
+			() -> {
+				NucleusMod.CONFIG.rngdleHudX = entries.get(5).x;
+				NucleusMod.CONFIG.rngdleHudY = entries.get(5).y;
+				NucleusMod.CONFIG.rngdleHudScale = entries.get(5).scale;
 			}));
 		entries.add(alertEntry());
 		// Keep everything on screen (window may have shrunk since saving).
@@ -163,7 +194,7 @@ public class MoveHudScreen extends Screen {
 		int y = (int) (this.height / 2f + NucleusMod.CONFIG.alertOffY);
 		return new Entry("Alerts", lines, colors, AlertHud.LINE_SCALES, x, y, scale,
 			() -> {
-				Entry e = entries.get(4);
+				Entry e = entries.get(6);
 				float bw = (HudText.width(this.font, e.lines, e.lineScales) + PAD * 2) * e.scale;
 				NucleusMod.CONFIG.alertOffX = Math.round(e.x + bw / 2f - this.width / 2f);
 				NucleusMod.CONFIG.alertOffY = Math.round(e.y - this.height / 2f);
@@ -199,6 +230,16 @@ public class MoveHudScreen extends Screen {
 		}
 		long totalSec = ms / 1000L;
 		return (totalSec / 60L) + ":" + String.format("%02d", totalSec % 60L);
+	}
+
+	/** m:ss.t with tenths (e.g. 2:05.3). */
+	private static String fmtDecimal(long ms) {
+		if (ms < 0) {
+			return "--:--";
+		}
+		long totalSec = ms / 1000L;
+		long t = (ms % 1000L) / 100L;
+		return (totalSec / 60L) + ":" + String.format("%02d", totalSec % 60L) + "." + t;
 	}
 
 	private void saveAll() {

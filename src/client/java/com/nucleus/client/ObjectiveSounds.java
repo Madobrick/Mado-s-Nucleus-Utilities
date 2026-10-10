@@ -79,12 +79,12 @@ public final class ObjectiveSounds {
 		if (!on) {
 			return;
 		}
-		play(false, 1.0f);
+		play(trigger, false, 1.0f);
 	}
 
 	/** Config preview button: plays regardless of toggles. */
 	public static void preview() {
-		play(true, 1.0f);
+		play(null, true, 1.0f);
 	}
 
 
@@ -117,8 +117,17 @@ public final class ObjectiveSounds {
 		// "You found <anything> with your Metal Detector!": the treasure
 		// moment. X is a wildcard (loot name), never a literal.
 		if (TREASURE_FOUND.matcher(norm).find()) {
-			onObjective(Trigger.CHEST);
+			// A scavenged-tool find is BOTH moments at once; the specific
+			// tool chime covers it so the chest chime doesn't double-play
+			// over it (same .wav twice). Falls back to chest when the tool
+			// trigger is toggled off.
+			if (norm.contains("scavenged") && NucleusMod.CONFIG.soundTool) {
+				onObjective(Trigger.TOOL);
+			} else {
+				onObjective(Trigger.CHEST);
+			}
 			maybeRollDye();
+			return;
 		}
 		// Same message naming a scavenged tool: also the tool moment.
 		if (norm.contains("with your metal detector") && norm.contains("scavenged")) {
@@ -138,21 +147,39 @@ public final class ObjectiveSounds {
 
 
 
-	private static long lastPlayAt = 0L;
-	private static final long DEBOUNCE_MS = 700L;
+	/**
+	 * Last chime per trigger. Repeats of the SAME objective within the
+	 * window collapse to one (one game event often fires two hooks at
+	 * once — e.g. a keeper handover chiming from both chat and the
+	 * inventory diff within the same tick), but different objectives never
+	 * block each other: apparatus, then a crystal, then a keeper tool in
+	 * one second is three chimes, not one. 250ms keeps same-tick doubles
+	 * collapsed while letting fast successive handovers chime.
+	 */
+	private static final java.util.Map<Trigger, Long> lastPlayAt =
+		new java.util.EnumMap<>(Trigger.class);
+	private static final long DEBOUNCE_MS = 250L;
+	/**
+	 * Yolkar's handover is one event seen several times over a few seconds
+	 * (egg leaves the inventory, "Well done", then the stench line), so it
+	 * gets a long window: one chime per handover.
+	 */
+	private static final long YOLKAR_DEBOUNCE_MS = 20_000L;
 
-	private static void play(boolean force, float pitch) {
+	private static void play(Trigger trigger, boolean force, float pitch) {
 		Minecraft client = Minecraft.getInstance();
 		if (client == null || client.player == null) {
 			return;
 		}
 		long now = System.currentTimeMillis();
-		if (!force && now - lastPlayAt < DEBOUNCE_MS) {
-			// Same game event often fires two hooks at once (e.g. a split
-			// plus its All-mode objective). One chime is enough.
-			return;
+		if (!force && trigger != null) {
+			Long last = lastPlayAt.get(trigger);
+			long window = trigger == Trigger.YOLKAR ? YOLKAR_DEBOUNCE_MS : DEBOUNCE_MS;
+			if (last != null && now - last < window) {
+				return;
+			}
+			lastPlayAt.put(trigger, now);
 		}
-		lastPlayAt = now;
 		float volume = NucleusMod.CONFIG.objectiveSoundVolume / 100f;
 		if (volume <= 0f && !force) {
 			return;

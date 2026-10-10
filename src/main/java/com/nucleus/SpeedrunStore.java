@@ -32,7 +32,7 @@ public class SpeedrunStore {
 		.resolve("speedrun.json");
 
 	public static final List<String> DEFAULT_ORDER = List.of(
-		"yolkar", "amber", "sapphire", "tool", "jade", "amethyst", "bal", "topaz"
+		"yolkar", "amber", "sapphire", "tool", "jade", "amethyst", "topaz"
 	);
 
 	public static final Map<String, String> NAMES = Map.of(
@@ -42,7 +42,6 @@ public class SpeedrunStore {
 		"tool", "Give tool",
 		"jade", "Jade Crystal",
 		"amethyst", "Amethyst Crystal",
-		"bal", "Bal",
 		"topaz", "Topaz Crystal",
 		"place", "Place all crystals"
 	);
@@ -55,7 +54,6 @@ public class SpeedrunStore {
 		"tool", 0x2ECC71,
 		"jade", 0x55FF55,
 		"amethyst", 0x9933FF,
-		"bal", 0xFF5555,
 		"topaz", 0xFFFF55,
 		"place", 0x55FFFF
 	);
@@ -100,8 +98,37 @@ public class SpeedrunStore {
 	public Set<String> gamblerDrops = new HashSet<>();
 	/** Epoch millis of own Divan's Alloy drops, oldest first. */
 	public List<Long> alloyDrops = new ArrayList<>();
+	/** Epoch millis of own Epic Bal pet drops, oldest first. */
+	public List<Long> epicBalDrops = new ArrayList<>();
+	/** Epoch millis of own Legendary Bal pet drops, oldest first. */
+	public List<Long> legendaryBalDrops = new ArrayList<>();
 	/** Unlocked untiered fun achievement ids. */
 	public Set<String> unlockedFun = new HashSet<>();
+	/** Repeatable achievement id -> total times earned (first repeat is x2). */
+	public Map<String, Integer> funRepeats = new HashMap<>();
+	/** Achievement ids with revealed hint descriptions. */
+	public Set<String> revealedHints = new HashSet<>();
+	/** Epoch day (UTC) the last hint was taken; one hint per day. */
+	public long hintDay = -1;
+	/** Local RNGdle best of the day (number + EP + day, no server involved). */
+	public long rngdleBestDay = -1;
+	public int rngdleBestNum = 0;
+	public long rngdleBestEp = 0;
+	/** All-time top RNGdle rolls as "number|ep", best first, capped at 100. */
+	public java.util.List<String> rngdleBests = new java.util.ArrayList<>();
+	/** One-time repair flag: purged /mado rngdleTest spam from the board. */
+	public boolean rngdleTestPurged = false;
+	/** One finished speedrun: totals, per-split breakdown, bundle loot. */
+	public static class RunRecord {
+		public long finishedAt = 0;
+		public long totalMs = -1;
+		public List<String> ids = new ArrayList<>();
+		public List<Long> splits = new ArrayList<>();
+		public List<Long> segments = new ArrayList<>();
+		public List<String> loot = new ArrayList<>();
+	}
+	/** Finished-run history, oldest first, capped at 100. */
+	public List<RunRecord> runHistory = new ArrayList<>();
 	/** Every finished run total, oldest first (capped, for trimmed average). */
 	public List<Long> runTotals = new ArrayList<>();
 	/** Finished nucleus-run count (achievement progress). */
@@ -168,7 +195,32 @@ public class SpeedrunStore {
 				segmentHistory = new HashMap<>();
 				for (Map.Entry<String, List<Long>> e : loaded.segmentHistory.entrySet()) {
 					if (e.getKey() != null && e.getValue() != null) {
-						segmentHistory.put(e.getKey(), new ArrayList<>(e.getValue()));
+						List<Long> clean = new ArrayList<>();
+						for (Long t : e.getValue()) {
+							if (t != null && t >= 500L) {
+								clean.add(t);
+							}
+						}
+						if (!clean.isEmpty()) {
+							segmentHistory.put(e.getKey(), clean);
+						}
+					}
+				}
+			}
+			// One-time repair: drop bogus sub-half-second bests, backfill
+			// from surviving history where possible.
+			for (String id : new ArrayList<>(bestSegments.keySet())) {
+				Long v = bestSegments.get(id);
+				if (v != null && v < 500L) {
+					List<Long> hist = segmentHistory.get(id);
+					if (hist == null || hist.isEmpty()) {
+						bestSegments.remove(id);
+					} else {
+						long m = hist.get(0);
+						for (long t : hist) {
+							m = Math.min(m, t);
+						}
+						bestSegments.put(id, m);
 					}
 				}
 			}
@@ -181,11 +233,79 @@ public class SpeedrunStore {
 			if (loaded.alloyDrops != null) {
 				alloyDrops = new ArrayList<>(loaded.alloyDrops);
 			}
+			if (loaded.epicBalDrops != null) {
+				epicBalDrops = new ArrayList<>(loaded.epicBalDrops);
+			}
+			if (loaded.legendaryBalDrops != null) {
+				legendaryBalDrops = new ArrayList<>(loaded.legendaryBalDrops);
+			}
 			if (loaded.unlockedFun != null) {
 				unlockedFun = new HashSet<>(loaded.unlockedFun);
 			}
+			if (loaded.funRepeats != null) {
+				funRepeats = new HashMap<>(loaded.funRepeats);
+			}
+			if (loaded.revealedHints != null) {
+				revealedHints = new HashSet<>(loaded.revealedHints);
+			}
+			hintDay = loaded.hintDay;
+		rngdleBestDay = loaded.rngdleBestDay;
+		rngdleBestNum = loaded.rngdleBestNum;
+		rngdleBestEp = loaded.rngdleBestEp;
+		rngdleTestPurged = loaded.rngdleTestPurged;
+		if (loaded.rngdleBests != null) {
+			rngdleBests = new java.util.ArrayList<>(loaded.rngdleBests);
+		}
+		// One-time repair: /mado rngdleTest used to record to the board, so
+		// drop the 777777 spam it left behind (test rolls never record now).
+		boolean touched = false;
+		if (!rngdleTestPurged) {
+			rngdleTestPurged = true;
+			touched = true;
+			java.util.Iterator<String> it = rngdleBests.iterator();
+			while (it.hasNext()) {
+				String e = it.next();
+				if (e != null && e.startsWith("777777|")) {
+					it.remove();
+				}
+			}
+			if (rngdleBestNum == 777777) {
+				rngdleBestNum = 0;
+				rngdleBestEp = 0;
+			}
+		}
+		while (rngdleBests.size() > 100) {
+			rngdleBests.remove(rngdleBests.size() - 1);
+			touched = true;
+		}
+		if (touched) {
+			save();
+		}
 			if (loaded.runTotals != null) {
 				runTotals = new ArrayList<>(loaded.runTotals);
+			}
+			if (loaded.runHistory != null) {
+				runHistory = new ArrayList<>();
+				for (RunRecord r : loaded.runHistory) {
+					if (r != null && r.totalMs >= 0) {
+						if (r.ids == null) {
+							r.ids = new ArrayList<>();
+						}
+						if (r.splits == null) {
+							r.splits = new ArrayList<>();
+						}
+						if (r.segments == null) {
+							r.segments = new ArrayList<>();
+						}
+						if (r.loot == null) {
+							r.loot = new ArrayList<>();
+						}
+						runHistory.add(r);
+					}
+				}
+				while (runHistory.size() > 100) {
+					runHistory.remove(0);
+				}
 			}
 			completedRuns = Math.max(0, loaded.completedRuns);
 			if (loaded.unlockedTiers != null) {
@@ -211,14 +331,19 @@ public class SpeedrunStore {
 	}
 
 	/**
-	 * Resets all achievements (tiers, fun feats, gambler drops, alloy counts,
-	 * completed-run counter). Run history, bests and averages are kept.
+	 * Resets all achievements (tiers, fun feats, gambler drops, alloy and
+	 * Bal pet counts, completed-run counter). Run history, bests and
+	 * averages are kept.
 	 */
 	public void resetAchievements() {
 		unlockedFun = new HashSet<>();
+		funRepeats = new HashMap<>();
+		revealedHints = new HashSet<>();
 		unlockedTiers = new HashMap<>();
 		gamblerDrops = new HashSet<>();
 		alloyDrops = new ArrayList<>();
+		epicBalDrops = new ArrayList<>();
+		legendaryBalDrops = new ArrayList<>();
 		completedRuns = 0;
 		save();
 	}
@@ -294,7 +419,8 @@ public class SpeedrunStore {
 	 * Segment history feeds per-split averages; the best run's splits are
 	 * snapshotted for the history hover. Totals history is capped.
 	 */
-	public boolean submitRun(long totalMs, List<String> ids, List<Long> timesMs, List<Long> segmentMs) {
+	public boolean submitRun(long totalMs, List<String> ids, List<Long> timesMs, List<Long> segmentMs,
+		RunRecord record) {
 		boolean newBest = bestTotalMs < 0 || totalMs < bestTotalMs;
 		if (newBest) {
 			bestTotalMs = totalMs;
@@ -312,6 +438,11 @@ public class SpeedrunStore {
 		}
 		for (int i = 0; i < ids.size() && i < segmentMs.size(); i++) {
 			long t = segmentMs.get(i);
+			// Sub-half-second segments are bogus instant fires
+			// (double-complete, mass-close on 5th place) — never records.
+			if (t < 500L) {
+				continue;
+			}
 			Long prev = bestSegments.get(ids.get(i));
 			if (prev == null || t < prev) {
 				bestSegments.put(ids.get(i), t);
@@ -325,6 +456,12 @@ public class SpeedrunStore {
 		runTotals.add(totalMs);
 		while (runTotals.size() > 5000) {
 			runTotals.remove(0);
+		}
+		if (record != null && record.totalMs >= 0) {
+			runHistory.add(record);
+			while (runHistory.size() > 100) {
+				runHistory.remove(0);
+			}
 		}
 		save();
 		return newBest;

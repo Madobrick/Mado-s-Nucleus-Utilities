@@ -108,6 +108,14 @@ public final class Scavenger {
 			lastTools.putAll(scanTools(client));
 			return;
 		}
+		if (client.screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen) {
+			// Backpacks, chests, trades: inventory shuffles through a
+			// container GUI are never fresh finds — absorb them silently.
+			lastTools.clear();
+			lastTools.putAll(scanTools(client));
+			hadFullSet = distinctCount(lastTools) >= 4;
+			return;
+		}
 		Map<String, Integer> current = scanTools(client);
 		int beforeTotal = totalCount(lastTools);
 		int afterTotal = totalCount(current);
@@ -134,6 +142,14 @@ public final class Scavenger {
 			return 0.0;
 		}
 		return toolEvents * 3_600_000.0 / active;
+	}
+
+	public static double setsPerHour() {
+		long active = activeMs();
+		if (active < 5_000L) {
+			return 0.0;
+		}
+		return setsCompleted * 3_600_000.0 / active;
 	}
 
 	/** Mean active time per completed full set (-1 when no set yet). */

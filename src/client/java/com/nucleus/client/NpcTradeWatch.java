@@ -39,7 +39,9 @@ public final class NpcTradeWatch {
 		new ItemWatch("scavenged lapis sword", Trigger.TOOL, false, false),
 		new ItemWatch("scavenged golden hammer", Trigger.TOOL, false, false),
 		new ItemWatch("scavenged diamond axe", Trigger.TOOL, false, false),
-		new ItemWatch("scavenged emerald hammer", Trigger.TOOL, false, false)
+		new ItemWatch("scavenged emerald hammer", Trigger.TOOL, false, false),
+		// Any color: Yolkar takes one Goblin Egg of any type.
+		new ItemWatch("goblin egg", Trigger.YOLKAR, false, false)
 	};
 
 	/** Recent right-clicks count as handover context for 30s. */

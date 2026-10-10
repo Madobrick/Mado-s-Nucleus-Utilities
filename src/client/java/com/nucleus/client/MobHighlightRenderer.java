@@ -60,7 +60,7 @@ public final class MobHighlightRenderer {
 		if (markers.isEmpty()) {
 			return;
 		}
-		boolean throughWalls = NucleusMod.CONFIG.mobHighlightWalls;
+		boolean throughWalls = true; // always on (toggle removed)
 		for (var entry : markers.entrySet()) {
 			MobMarkers.Marker m = entry.getValue();
 			if (m == null) {

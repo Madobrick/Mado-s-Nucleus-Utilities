@@ -42,6 +42,7 @@ public final class HollowsDetector {
 	private static boolean inHollows = false;
 	private static boolean inMines = false;
 	private static boolean inNucleus = false;
+	private static boolean inKhazad = false;
 	private static int ticksSinceLastCheck = 0;
 	private static long lastWarnAt = 0L;
 	private static ClientLevel warnLevel = null;
@@ -54,6 +55,7 @@ public final class HollowsDetector {
 		inHollows = false;
 		inMines = false;
 		inNucleus = false;
+		inKhazad = false;
 		ticksSinceLastCheck = 0;
 		lastWarnAt = 0L;
 		warnLevel = null;
@@ -118,6 +120,7 @@ public final class HollowsDetector {
 		// trackers never scan the scoreboard themselves.
 		inMines = scanMines(client);
 		inNucleus = scanNucleus(client);
+		inKhazad = scanKhazad(client);
 	}
 
 	/**
@@ -183,7 +186,7 @@ public final class HollowsDetector {
 		}
 		lastWarnAt = now;
 		Component dismiss = Component.literal(" §c§l[Don't show again]").withStyle(style -> style
-			.withClickEvent(new net.minecraft.network.chat.ClickEvent.RunCommand("/mado notabwarn"))
+			.withClickEvent(new net.minecraft.network.chat.ClickEvent.RunCommand("/madodebug disableTabwarn"))
 			.withHoverEvent(new net.minecraft.network.chat.HoverEvent.ShowText(
 				Component.literal("§7Hide this warning forever"))));
 		MadoChat.chat(client, Component.literal(
@@ -311,6 +314,11 @@ public final class HollowsDetector {
 		return inNucleus;
 	}
 
+	/** True when the sidebar location is Khazad-dum (1Hz cached). */
+	public static boolean inKhazadDum(Minecraft client) {
+		return inKhazad;
+	}
+
 	private static boolean scanMines(Minecraft client) {
 		if (client == null || client.level == null) {
 			return false;
@@ -346,6 +354,26 @@ public final class HollowsDetector {
 		if (scoreboard != null) {
 			for (String line : combinedTeamLines(scoreboard)) {
 				if (line.contains("crystal nucleus")) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private static boolean scanKhazad(Minecraft client) {
+		if (client == null || client.level == null) {
+			return false;
+		}
+		for (String line : sidebarLines(client)) {
+			if (line.contains("khazad")) {
+				return true;
+			}
+		}
+		Scoreboard scoreboard = client.level.getScoreboard();
+		if (scoreboard != null) {
+			for (String line : combinedTeamLines(scoreboard)) {
+				if (line.contains("khazad")) {
 					return true;
 				}
 			}

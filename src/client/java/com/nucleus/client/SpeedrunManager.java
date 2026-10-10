@@ -33,12 +33,9 @@ import com.nucleus.SpeedrunStore;
  * item form, so there is no pickup event; NPC lines are excluded so
  * Yolkar's "stealing her Amber Crystal" can't false-fire, and player chat
  * is excluded so copycats can't fire splits.</li>
- * <li>Bal: Bal's defeat lines ("looks weak and tired" / "retreats into
- * the lava", shared with the Bal timer) — entering the area alone completes
- * nothing.</li>
- * <li>Topaz: "topaz crystal" chat like the others, plus the same Bal-kill
- * lines. One kill completes adjacent bal + topaz splits together so the run
- * never stalls a full respawn on the second of the pair.</li>
+	 * <li>Topaz: first non-NPC, non-player chat mention of "topaz crystal"
+	 * like the others — picked up next to Bal after the kill. There is no
+	 * Bal-kill split: Bal drops a Topaz gemstone, not the crystal.</li>
  * <li>Place: counts "You placed the X Crystal!" lines plus the CRYSTAL
  * PLACED (x/5) title counter; the 5th one ends the run.</li>
  * </ul>
@@ -59,6 +56,12 @@ public final class SpeedrunManager {
 	private static final int BOX_MIN_Z = 544;
 	private static final int BOX_MAX_Z = 555;
 
+	/** The run start/finish region (also what Hide Bundle blacks out). */
+	public static net.minecraft.world.phys.AABB startBox() {
+		return new net.minecraft.world.phys.AABB(
+			BOX_MIN_X, BOX_MIN_Y, BOX_MIN_Z, BOX_MAX_X + 1, BOX_MAX_Y + 1, BOX_MAX_Z + 1);
+	}
+
 	private static State state = State.IDLE;
 	private static long runStartMs = 0L;
 	private static List<String> runOrder = new ArrayList<>();
@@ -70,22 +73,61 @@ public final class SpeedrunManager {
 	private static int tickCounter = 0;
 	/** Crystal placements seen this run (5 ends it). */
 	private static int placeCount = 0;
-	/** Last CRYSTAL PLACED title counter (dup-proofing the title path). */
-	private static int placedTitleX = -1;
-
 	/**
-	 * Title-counter placement path: chimes exactly once per new count and
-	 * ends the run on 5/5. Chat lines remain as backup; state guards and
-	 * the counter make doubles impossible.
+	 * Distinct crystals placed this run. Each of the five can only be
+	 * placed once, so a repeat line for an already-counted crystal is a
+	 * duplicate server echo, never a second placement.
 	 */
-	public static void onPlacedTitle(Minecraft client, int x) {
-		if (x == placedTitleX) {
+	private static final java.util.Set<String> placedCrystals = new java.util.HashSet<>();
+	/** Finished runs in the current lobby (auto safe mode counts these). */
+	private static int lobbyRuns = 0;
+	/** Finished run totals in the current lobby, oldest first (lobby summary). */
+	private static final List<Long> lobbyTotals = new ArrayList<>();
+	/** Bundle loot lines seen during the current run (display strings). */
+	private static final List<String> runLoot = new ArrayList<>();
+	/** The just-finished record still accepting late gap bundles (<=60s). */
+	private static SpeedrunStore.RunRecord lastFinished = null;
+	private static long lastFinishedAt = 0L;
+	private static final long GAP_LOOT_MS = 60_000L;
+	private static final int MAX_LOOT_LINES = 40;
+	/**
+	 * New bundle block started: drop whatever the previous block collected
+	 * so a run record only ever shows the MOST RECENT bundle (one block's
+	 * lines, not several bundles piled up).
+	 */
+	public static void noteBundleBlockStart() {
+		try {
+			if (state == State.RUNNING) {
+				runLoot.clear();
+			} else if (state == State.FINISHED && lastFinished != null
+				&& System.currentTimeMillis() - lastFinishedAt < GAP_LOOT_MS) {
+				lastFinished.loot.clear();
+				NucleusMod.SPEEDRUN.save();
+			}
+		} catch (Exception ignored) {
+		}
+	}
+	/**
+	 * Bundle loot line for the run history. Live lines go to the running
+	 * run's buffer; lines arriving in the minute after a finish (the run's
+	 * own bundle opens right after the 5th placement) append to that record.
+	 */
+	public static void noteBundleLoot(String entry) {
+		if (entry == null || entry.isEmpty()) {
 			return;
 		}
-		placedTitleX = x;
-		ObjectiveSounds.onObjective(ObjectiveSounds.Trigger.PLACE);
-		if (x >= 5 && client != null) {
-			finishFromPlace(client);
+		try {
+			if (state == State.RUNNING) {
+				if (runLoot.size() < MAX_LOOT_LINES) {
+					runLoot.add(entry);
+				}
+			} else if (state == State.FINISHED && lastFinished != null
+				&& System.currentTimeMillis() - lastFinishedAt < GAP_LOOT_MS
+				&& lastFinished.loot.size() < MAX_LOOT_LINES) {
+				lastFinished.loot.add(entry);
+				NucleusMod.SPEEDRUN.save();
+			}
+		} catch (Exception ignored) {
 		}
 	}
 	/** 60s quiet -> -60s once + pause until input. */
@@ -135,6 +177,10 @@ public final class SpeedrunManager {
 	}
 
 	public static void onLeave() {
+		printLobbySummaryIfNeeded();
+		Achievements.abortRun();
+		runLoot.clear();
+		lastFinished = null;
 		state = State.IDLE;
 		runOrder = new ArrayList<>();
 		splitTimes.clear();
@@ -143,13 +189,57 @@ public final class SpeedrunManager {
 		finishedTotalMs = -1;
 		wasInBox = false;
 		placeCount = 0;
-		placedTitleX = -1;
+		placedCrystals.clear();
+		lobbyRuns = 0;
+		lobbyTotals.clear();
 		AFK.reset();
 		PetAlert.resetLobby();
 	}
 
+	/** Lobby summary: average, fastest and runs/hour for 2+ finished runs. */
+	private static void printLobbySummaryIfNeeded() {
+		if (lobbyTotals.size() < 2 || !NucleusMod.CONFIG.lobbySummary) {
+			return;
+		}
+		Minecraft client = Minecraft.getInstance();
+		MadoChat.chat(client, Component.literal(
+			"§b[MNU] §6§lLobby summary §7(§e" + lobbyTotals.size() + " §7runs)"));
+		MadoChat.chat(client, Component.literal("§7" + lobbyStatsLine()));
+	}
+
+	private static String lobbyStatsLine() {
+		long sum = 0;
+		long min = lobbyTotals.get(0);
+		for (long t : lobbyTotals) {
+			sum += t;
+			min = Math.min(min, t);
+		}
+		long avg = sum / lobbyTotals.size();
+		double perHour = avg > 0 ? 3_600_000.0 / avg : 0.0;
+		return "Avg: §e" + SpeedrunStore.fmt(avg)
+			+ " §7| Fastest: §e" + SpeedrunStore.fmt(min)
+			+ " §7| §e" + String.format("%.1f", perHour) + "§7/h"
+			+ " §7| Runs: §e" + lobbyTotals.size();
+	}
+
+	/** /mado lobbyStats: current lobby totals without leaving. */
+	public static void printLobbyStats() {
+		Minecraft client = Minecraft.getInstance();
+		if (lobbyTotals.isEmpty()) {
+			MadoChat.chat(client, Component.literal("§b[MNU] §7No runs this lobby yet."));
+			return;
+		}
+		MadoChat.chat(client, Component.literal(
+			"§b[MNU] §6§lLobby stats §7(§e" + lobbyTotals.size() + " §7run"
+				+ (lobbyTotals.size() == 1 ? "" : "s") + ")"));
+		MadoChat.chat(client, Component.literal("§7" + lobbyStatsLine()));
+	}
+
 	public static void resetRun() {
 		Minecraft client = Minecraft.getInstance();
+		Achievements.abortRun();
+		runLoot.clear();
+		lastFinished = null;
 		state = State.IDLE;
 		runOrder = new ArrayList<>();
 		splitTimes.clear();
@@ -157,7 +247,7 @@ public final class SpeedrunManager {
 		splitIdx = 0;
 		finishedTotalMs = -1;
 		placeCount = 0;
-		placedTitleX = -1;
+		placedCrystals.clear();
 		AFK.reset();
 		wasInBox = client.player != null && inBox(client.player.blockPosition());
 		MadoChat.chat(client, Component.literal("§b[MNU] §7Speedrun reset."));
@@ -280,9 +370,16 @@ public final class SpeedrunManager {
 		}
 		String norm = HollowsDetector.stripFormatting(raw).toLowerCase();
 		// Crystal placements count even outside a run (5 ends a run).
-		// Silent here — the CRYSTAL PLACED (x/5) title owns the sound.
+		// These are the real "You placed the X Crystal!" chat lines —
+		// no title owns this sound. Counted by distinct crystal name:
+		// each crystal is consumed on placement, so a second line for
+		// an already-counted one is a duplicate echo, not a placement.
 		if (!ChatLines.isPlayerChat(norm) && norm.contains("you placed the") && norm.contains("crystal")) {
-			placeCount++;
+			String which = placedCrystalName(norm);
+			if (which == null || placedCrystals.add(which)) {
+				placeCount++;
+				ObjectiveSounds.onObjective(ObjectiveSounds.Trigger.PLACE);
+			}
 		}
 		if (state != State.RUNNING || splitIdx >= runOrder.size()) {
 			return;
@@ -297,16 +394,13 @@ public final class SpeedrunManager {
 			finishFromPlace(client);
 			return;
 		}
-		boolean balKill = norm.contains("looks weak and tired") || norm.contains("retreats into the lava");
 		String head = runOrder.get(splitIdx);
 		boolean hit = switch (head) {
 			case "yolkar" -> ChatLines.isNpc(norm) && norm.contains("yolkar")
 				&& (norm.contains("well done") || norm.contains("covering you in my foul stench"));
 			case "tool" -> norm.contains("you have returned the scavenged");
-			case "amber", "sapphire", "jade", "amethyst" ->
+			case "amber", "sapphire", "jade", "amethyst", "topaz" ->
 				!norm.contains("[npc]") && norm.contains(head + " crystal");
-			case "bal" -> balKill;
-			case "topaz" -> (!norm.contains("[npc]") && norm.contains("topaz crystal")) || balKill;
 			case "place" -> {
 				if (norm.contains("you placed the") && norm.contains("crystal")) {
 					MadoChat.chat(client, Component.literal("§b[MNU] §7Crystals placed: §e"
@@ -318,16 +412,17 @@ public final class SpeedrunManager {
 		};
 		if (hit) {
 			completeHead(client, false);
-			// One Bal kill satisfies adjacent bal + topaz splits together so
-			// the run never stalls a full respawn on the second of the pair.
-			if (balKill && splitIdx < runOrder.size()) {
-				String next = runOrder.get(splitIdx);
-				if ((head.equals("bal") && next.equals("topaz"))
-					|| (head.equals("topaz") && next.equals("bal"))) {
-					completeHead(client, false);
-				}
+		}
+	}
+
+	/** Which of the five crystals a placement line names (null if none). */
+	private static String placedCrystalName(String norm) {
+		for (String c : new String[] { "amber", "sapphire", "jade", "amethyst", "topaz" }) {
+			if (norm.contains(c)) {
+				return c;
 			}
 		}
+		return null;
 	}
 
 	private static void startRun(Minecraft client) {
@@ -336,8 +431,11 @@ public final class SpeedrunManager {
 		segmentTimes.clear();
 		splitIdx = 0;
 		placeCount = 0;
-		placedTitleX = -1;
+		placedCrystals.clear();
 		AFK.reset();
+		Achievements.onRunStarted();
+		runLoot.clear();
+		lastFinished = null;
 		runStartMs = System.currentTimeMillis();
 		finishedTotalMs = -1;
 		state = State.RUNNING;
@@ -393,12 +491,33 @@ public final class SpeedrunManager {
 		long total = elapsedMs();
 		finishedTotalMs = total;
 		state = State.FINISHED;
-		boolean newBest = NucleusMod.SPEEDRUN.submitRun(total, new ArrayList<>(runOrder), new ArrayList<>(splitTimes), new ArrayList<>(segmentTimes));
+		SpeedrunStore.RunRecord record = new SpeedrunStore.RunRecord();
+		record.finishedAt = System.currentTimeMillis();
+		record.totalMs = total;
+		record.ids = new ArrayList<>(runOrder);
+		record.splits = new ArrayList<>(splitTimes);
+		record.segments = new ArrayList<>(segmentTimes);
+		record.loot = new ArrayList<>(runLoot);
+		runLoot.clear();
+		boolean newBest = NucleusMod.SPEEDRUN.submitRun(total, new ArrayList<>(runOrder), new ArrayList<>(splitTimes), new ArrayList<>(segmentTimes), record);
+		lastFinished = record;
+		lastFinishedAt = System.currentTimeMillis();
 		Achievements.onRunFinished(total);
 		NucleusMod.LOGGER.info("Speedrun finished: {} (best {})", SpeedrunStore.fmt(total), SpeedrunStore.fmt(NucleusMod.SPEEDRUN.bestTotalMs));
 		MadoChat.chat(client, Component.literal(
 			"§b[MNU] §fRun finished: §e" + SpeedrunStore.fmt(total)
 				+ (newBest ? " §6§lNEW BEST!" : " §7(Best: " + SpeedrunStore.fmt(NucleusMod.SPEEDRUN.bestTotalMs) + ")")));
+		lobbyRuns++;
+		lobbyTotals.add(total);
+		if (NucleusMod.CONFIG.autoSafeMode && !NucleusMod.CONFIG.safeMode) {
+			int need = Math.min(20, Math.max(1, NucleusMod.CONFIG.autoSafeModeRuns));
+			if (lobbyRuns >= need) {
+				NucleusMod.CONFIG.safeMode = true;
+				NucleusMod.CONFIG.save();
+				MadoChat.chat(client, Component.literal("§b[MNU] §eAuto safe mode: §aON §7("
+					+ lobbyRuns + " run" + (lobbyRuns == 1 ? "" : "s") + " this lobby)"));
+			}
+		}
 	}
 
 	private static boolean inBox(BlockPos pos) {

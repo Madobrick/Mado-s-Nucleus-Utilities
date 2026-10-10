@@ -13,10 +13,12 @@ import com.nucleus.NucleusMod;
 
 /**
  * The only client commands: /mado (config), /mado times|runs (run history),
- * /mado stop (reset speedrun), /mado delete last|all (custom waypoints),
- * /mado debug (diagnostics). Everything else was cut on purpose.
- */
-public final class MadoBrickCommands {
+ * /mado stop (reset speedrun), /mado lobbyStats (current lobby totals),
+ * /mado safe (safe mode), /mado syncRuns (adopt official run total),
+ * /madodebug (diagnostics), /madodebug achievement|rngdle|dye (previews),
+ * /madodebug disableTabwarn (wire for the [Don't show again] button).
+ * Everything else was cut on purpose.
+ */public final class MadoBrickCommands {
 	private MadoBrickCommands() {
 	}
 
@@ -27,13 +29,21 @@ public final class MadoBrickCommands {
 				.then(ClientCommands.literal("times").executes(MadoBrickCommands::history))
 				.then(ClientCommands.literal("runs").executes(MadoBrickCommands::history))
 				.then(ClientCommands.literal("stop").executes(MadoBrickCommands::stop))
-				.then(ClientCommands.literal("delete")
-					.then(ClientCommands.literal("last").executes(MadoBrickCommands::deleteLast))
-					.then(ClientCommands.literal("all").executes(MadoBrickCommands::deleteAll)))
-				.then(ClientCommands.literal("debug").executes(MadoBrickCommands::debug))
-				.then(ClientCommands.literal("notabwarn").executes(MadoBrickCommands::noTabWarn))
+				.then(ClientCommands.literal("lobbyStats").executes(MadoBrickCommands::lobbyStats))
 				.then(ClientCommands.literal("safe").executes(MadoBrickCommands::safe))
-				.then(ClientCommands.literal("dye").executes(MadoBrickCommands::dye)));
+				.then(ClientCommands.literal("syncRuns").executes(MadoBrickCommands::syncRuns)));
+			dispatcher.register(ClientCommands.literal("madodebug")
+				.executes(MadoBrickCommands::debug)
+				.then(ClientCommands.literal("achievement")
+					.then(ClientCommands.argument("tier", com.mojang.brigadier.arguments.StringArgumentType.word())
+						.executes(MadoBrickCommands::debugAchievement)))
+				.then(ClientCommands.literal("rngdle")
+					.executes(MadoBrickCommands::rngdleTest)
+					.then(ClientCommands.argument("number",
+						com.mojang.brigadier.arguments.IntegerArgumentType.integer(0, 1000000))
+						.executes(MadoBrickCommands::rngdleTestNumber)))
+				.then(ClientCommands.literal("dye").executes(MadoBrickCommands::dye))
+				.then(ClientCommands.literal("disableTabwarn").executes(MadoBrickCommands::dismissTabWarn)));
 		});
 	}
 
@@ -52,20 +62,55 @@ public final class MadoBrickCommands {
 		return 1;
 	}
 
-	private static int deleteLast(CommandContext<FabricClientCommandSource> ctx) {
-		Minecraft client = Minecraft.getInstance();
-		if (client.player == null) {
-			MadoChat.err(ctx.getSource(), Component.literal("No player."));
-			return 0;
-		}
-		MadoBrickKeybinds.removeLastCustom(client);
+	private static int lobbyStats(CommandContext<FabricClientCommandSource> ctx) {
+		SpeedrunManager.printLobbyStats();
 		return 1;
 	}
 
-	private static int deleteAll(CommandContext<FabricClientCommandSource> ctx) {
-		MadoBrickWaypoints.clearCustom();
-		NucleusMod.CONFIG.save();
-		MadoChat.feedback(ctx.getSource(), Component.literal("§b[MNU] §fCustom waypoints cleared."));
+		private static int debugAchievement(CommandContext<FabricClientCommandSource> ctx) {
+		String tier;
+		try {
+			tier = ctx.getArgument("tier", String.class);
+		} catch (Exception ignored) {
+			tier = "";
+		}
+		String shown = Achievements.previewTier(tier);
+		if (shown == null) {
+			MadoChat.err(ctx.getSource(), Component.literal(
+				"§b[MNU] §7Usage: /madodebug achievement <easy|medium|challenging|hard|veryhard|impossible>"));
+			return 0;
+		}
+		MadoChat.feedback(ctx.getSource(), Component.literal(
+			"§b[MNU] §7Preview only - nothing unlocked."));
+		return 1;
+	}
+
+	private static int rngdleTest(CommandContext<FabricClientCommandSource> ctx) {
+		RngdleGame.startTest(null);
+		return 1;
+	}
+
+	private static int rngdleTestNumber(CommandContext<FabricClientCommandSource> ctx) {
+		int n;
+		try {
+			n = ctx.getArgument("number", Integer.class);
+		} catch (Exception ignored) {
+			return 0;
+		}
+		RngdleGame.startTest(n);
+		return 1;
+	}
+
+	/** /mado syncRuns: adopt the official run total, or say how. */
+	private static int syncRuns(CommandContext<FabricClientCommandSource> ctx) {
+		try {
+			if (Achievements.syncRunsFromOpenMenu()) {
+				return 1;
+			}
+		} catch (Exception ignored) {
+		}
+		MadoChat.feedback(ctx.getSource(), Component.literal(
+			"§b[MNU] §7" + Achievements.SYNC_RUNS_HINT));
 		return 1;
 	}
 
@@ -95,6 +140,19 @@ public final class MadoBrickCommands {
 			? "§aactive §7(" + JackpotAnimation.type().displayName + ")" : "§8idle"));
 		out.add("§7Pet widget: " + (PetAlert.widgetFound() ? "§afound" : "§cnot found")
 			+ " §7| pet: §f" + (PetAlert.currentPet() == null ? "-" : PetAlert.currentPet()));
+		out.add("§7Bal state: §f" + BalWatch.state()
+			+ " §7| last seen: §f" + (BalWatch.lastSeenName() == null ? "-" : BalWatch.lastSeenName())
+			+ " §7(size §f" + BalWatch.lastSeenSize() + "§7)");
+		try {
+			if (client.level != null) {
+				java.util.List<String> bars = BalWatch.lastBossNames();
+				out.add("§7BalBoss: §f" + (bars.isEmpty() ? "none" : String.join(" §7| §f", bars)));
+				out.add("§7BalSide: §f" + (BalWatch.sidebarHit() ? "yes" : "no"));
+				String burst = BalWatch.burstInfo();
+				out.add("§7BalBurst: §f" + (burst.isEmpty() ? "none yet" : burst));
+			}
+		} catch (Exception ignored) {
+		}
 		out.add("§7Scavenger held: §f" + Scavenger.heldTools()
 			+ " §7| rate: §f" + String.format("%.1f", Scavenger.toolsPerHour()) + "/h"
 			+ " §7| sets: §e" + Scavenger.setsCompleted());
@@ -116,7 +174,8 @@ public final class MadoBrickCommands {
 		return 1;
 	}
 
-	private static int noTabWarn(CommandContext<FabricClientCommandSource> ctx) {
+	/** Wire for the [Don't show again] button: no hand-typing. */
+	private static int dismissTabWarn(CommandContext<FabricClientCommandSource> ctx) {
 		NucleusMod.CONFIG.tabWarnEnabled = false;
 		NucleusMod.CONFIG.save();
 		MadoChat.feedback(ctx.getSource(),

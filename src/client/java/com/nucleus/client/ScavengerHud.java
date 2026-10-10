@@ -37,12 +37,20 @@ public final class ScavengerHud implements HudElement {
 			return;
 		}
 
-		String line1 = "Tools: " + Scavenger.toolEvents()
-			+ " (" + String.format("%.1f", Scavenger.toolsPerHour()) + "/h)"
-			+ (Scavenger.afkPaused() ? " [AFK]" : "");
+		String line1;
+		if (NucleusMod.CONFIG.scavengerSetsPerHour) {
+			line1 = "Sets: " + Scavenger.setsCompleted()
+				+ " (" + String.format("%.1f", Scavenger.setsPerHour()) + "/h)"
+				+ (Scavenger.afkPaused() ? " [AFK]" : "");
+		} else {
+			line1 = "Tools: " + Scavenger.toolEvents()
+				+ " (" + String.format("%.1f", Scavenger.toolsPerHour()) + "/h)"
+				+ (Scavenger.afkPaused() ? " [AFK]" : "");
+		}
 		long avg = Scavenger.avgSetMs();
 		String line2 = "Avg full set: " + (avg < 0 ? "--:--" : fmtLong(avg));
-		String line3 = "Sets: " + Scavenger.setsCompleted();
+		long avgFind = DivanDetectorSolver.avgFindMs();
+		String line3 = "Avg find chest: " + (avgFind < 0 ? "--:--" : fmtDecimal(avgFind));
 
 		int x = NucleusMod.CONFIG.scavengerX;
 		int y = NucleusMod.CONFIG.scavengerY;
@@ -54,8 +62,7 @@ public final class ScavengerHud implements HudElement {
 		} catch (Exception ignored) {
 		}
 
-		int wmax = Math.max(client.font.width(line1),
-			Math.max(client.font.width(line2), client.font.width(line3)));
+		int wmax = Math.max(client.font.width(line1), Math.max(client.font.width(line2), client.font.width(line3)));
 		int pad = 3;
 		float s = NucleusMod.CONFIG.scavengerScale;
 		if (s < 0.5f || s > 3.0f) {
@@ -69,7 +76,7 @@ public final class ScavengerHud implements HudElement {
 			gfx.fill(-pad, -pad, wmax + pad, 3 * 10 - 1 + pad, HudTint.bg());
 			gfx.text(client.font, line1, 0, 0, 0xFFFFFFFF, true);
 			gfx.text(client.font, line2, 0, 10, 0xFF55FF55, true);
-			gfx.text(client.font, line3, 0, 20, 0xFFAAAAAA, true);
+			gfx.text(client.font, line3, 0, 20, 0xFFFFFF55, true);
 		} finally {
 			pose.popMatrix();
 		}
@@ -80,5 +87,14 @@ public final class ScavengerHud implements HudElement {
 		long m = totalSec / 60L;
 		long s = totalSec % 60L;
 		return m + ":" + String.format("%02d", s);
+	}
+
+	/** m:ss.t with tenths (e.g. 2:05.3). */
+	private static String fmtDecimal(long ms) {
+		long totalSec = ms / 1000L;
+		long m = totalSec / 60L;
+		long s = totalSec % 60L;
+		long t = (ms % 1000L) / 100L;
+		return m + ":" + String.format("%02d", s) + "." + t;
 	}
 }

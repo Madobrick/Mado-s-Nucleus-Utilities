@@ -61,7 +61,12 @@ public final class MadoBrickWaypointRenderer {
 			if (!MadoBrickWaypoints.visibleFor(wp.index())) {
 				continue;
 			}
+			// Etherwarp reaches 61 blocks: anything further renders dimmed.
+			double dist = eye.distanceTo(Vec3.atCenterOf(wp.pos()));
 			int color = MadoBrickWaypoints.colorFor(wp.index());
+			if (NucleusMod.CONFIG.waypointDimBeyondEtherwarp && dist > 61.0) {
+				color = dimColor(color, 0.35f);
+			}
 			int fill = withAlpha(color, 0x55);
 			try {
 				// Simple block highlight: outlined + slightly filled 1-block box.
@@ -72,7 +77,6 @@ public final class MadoBrickWaypointRenderer {
 				}
 
 				if (text) {
-					double dist = eye.distanceTo(Vec3.atCenterOf(wp.pos()));
 					String label = wp.label() + " §7(" + (int) dist + "m)";
 					var textProps = Gizmos.billboardTextOverBlock(label, wp.pos(), 1, color, 1.0f);
 					if (throughWalls) {
@@ -97,12 +101,17 @@ public final class MadoBrickWaypointRenderer {
 					}
 				}
 				ordered.sort(java.util.Comparator.comparingInt(MadoBrickWaypoints.Waypoint::index));
-				for (int i = 0; i + 1 < ordered.size(); i++) {
-					var a = ordered.get(i);
-					var b = ordered.get(i + 1);
-					int color = MadoBrickWaypoints.colorFor(a.index());
-					var lineProps = Gizmos.line(
-						Vec3.atCenterOf(a.pos()), Vec3.atCenterOf(b.pos()), color);
+			for (int i = 0; i + 1 < ordered.size(); i++) {
+				var a = ordered.get(i);
+				var b = ordered.get(i + 1);
+				int color = MadoBrickWaypoints.colorFor(a.index());
+				if (NucleusMod.CONFIG.waypointDimBeyondEtherwarp
+					&& eye.distanceTo(Vec3.atCenterOf(a.pos())) > 61.0
+					&& eye.distanceTo(Vec3.atCenterOf(b.pos())) > 61.0) {
+					color = dimColor(color, 0.35f);
+				}
+				var lineProps = Gizmos.line(
+					Vec3.atCenterOf(a.pos()), Vec3.atCenterOf(b.pos()), color);
 					if (throughWalls) {
 						lineProps.setAlwaysOnTop();
 					}
@@ -115,5 +124,14 @@ public final class MadoBrickWaypointRenderer {
 
 	private static int withAlpha(int argb, int alpha) {
 		return (alpha << 24) | (argb & 0x00FFFFFF);
+	}
+
+	/** Keeps alpha, scales RGB (for out-of-etherwarp-range dimming). */
+	private static int dimColor(int argb, float f) {
+		int a = (argb >>> 24) & 0xFF;
+		int r = (int) (((argb >> 16) & 0xFF) * f);
+		int g = (int) (((argb >> 8) & 0xFF) * f);
+		int b = (int) ((argb & 0xFF) * f);
+		return (a << 24) | (r << 16) | (g << 8) | b;
 	}
 }

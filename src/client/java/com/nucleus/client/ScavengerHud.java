@@ -48,9 +48,9 @@ public final class ScavengerHud implements HudElement {
 				+ (Scavenger.afkPaused() ? " [AFK]" : "");
 		}
 		long avg = Scavenger.avgSetMs();
-		String line2 = "Avg full set: " + (avg < 0 ? "--:--" : fmtLong(avg));
+		String line2 = "Avg full set: " + fmtLong(avg);
 		long avgFind = DivanDetectorSolver.avgFindMs();
-		String line3 = "Avg find chest: " + (avgFind < 0 ? "--:--" : fmtDecimal(avgFind));
+		String line3 = "Avg find chest: " + fmtDecimal(avgFind);
 
 		int x = NucleusMod.CONFIG.scavengerX;
 		int y = NucleusMod.CONFIG.scavengerY;
@@ -82,19 +82,17 @@ public final class ScavengerHud implements HudElement {
 		}
 	}
 
-	private static String fmtLong(long ms) {
+	/** m:ss, or --:-- for "none yet" (negative). */
+	static String fmtLong(long ms) {
+		if (ms < 0) {
+			return "--:--";
+		}
 		long totalSec = ms / 1000L;
-		long m = totalSec / 60L;
-		long s = totalSec % 60L;
-		return m + ":" + String.format("%02d", s);
+		return (totalSec / 60L) + ":" + String.format("%02d", totalSec % 60L);
 	}
 
-	/** m:ss.t with tenths (e.g. 2:05.3). */
-	private static String fmtDecimal(long ms) {
-		long totalSec = ms / 1000L;
-		long m = totalSec / 60L;
-		long s = totalSec % 60L;
-		long t = (ms % 1000L) / 100L;
-		return m + ":" + String.format("%02d", s) + "." + t;
+	/** m:ss.t with tenths (e.g. 2:05.3), or --:-- for "none yet". */
+	static String fmtDecimal(long ms) {
+		return ms < 0 ? "--:--" : fmtLong(ms) + "." + (ms % 1000L) / 100L;
 	}
 }

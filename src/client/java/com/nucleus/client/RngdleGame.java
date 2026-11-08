@@ -33,8 +33,6 @@ public final class RngdleGame {
 	private static final int SETS_PER_ROLL = 3;
 	/** True while a Mythic card still owes its auto-screenshot. */
 	private static boolean pendingMythicShot = false;
-	/** True while the running roll came from /madodebug rngdle (never recorded). */
-	private static boolean testRoll = false;
 
 	private enum Phase {
 		IDLE, DIGITS, BADGES, PAUSE, HOLD
@@ -287,49 +285,6 @@ public final class RngdleGame {
 	private static final Badge B_NEIGHBORS = new Badge("NEIGHBORS", "Neighbors", "solo:NEIGHBORS", 161);
 	private static final Badge B_PAIR = new Badge("PAIR", "Pair", "PAIRS", 120);
 	private static final Badge B_SIX_DIGITS = new Badge("SIX_DIGITS", "Six Digits", "solo:SIX_DIGITS", 111);
-
-	// 39 families, index-aligned display names not needed for scoring.
-	private static final String[][] FAMILIES = {
-		{"THIRTEENTH_POWER", "SEVENTEENTH_POWER", "NINETEENTH_POWER", "TENTH_POWER", "ELEVENTH_POWER", "NINTH_POWER", "EIGHTH_POWER", "SEVENTH_POWER", "SIXTH_POWER", "FIFTH_POWER", "FOURTH_POWER", "CUBE", "SQUARE", "OUROBOROS"},
-		{"DIGIT_ZERO", "DIGIT_ONE", "DIGIT_TWO", "DIGIT_THREE", "DIGIT_FOUR", "DIGIT_FIVE", "DIGIT_SIX", "DIGIT_SEVEN", "DIGIT_EIGHT", "DIGIT_NINE", "ONE_DIGIT"},
-		{"CONSEC_QUAD_EXACT", "CONSEC_QUAD_CONTAINS", "CONSEC_QUAD_SCRAMBLED", "CONSEC_TRIPLE_EXACT", "CONSEC_TRIPLE_SCRAMBLED", "CONSEC_TRIPLE_CONTAINS", "CONSEC_PAIR_EXACT", "CONSEC_PAIR_ADJACENT", "CONSEC_PAIR_NEARBY"},
-		{"SEQUENCE_6", "CASCADE", "WATERFALL", "EVEN_SPACING", "EVEN_SPACING_ABS", "TURTLE", "SEQUENCE_4", "SCRAMBLE", "SEQUENCE_3", "GEOMETRIC", "ARITHMETIC", "MINI_SCRAMBLE"},
-		{"CONTIGUOUS_THREE_PAIR", "FRAMED_PAIR", "FRAMED_DOUBLE", "THREE_PAIR", "CONTIGUOUS_TWO_PAIR", "TWO_PAIR", "CONTIGUOUS_PAIR", "PAIR"},
-		{"EXACT_BOOB_80085", "EXACT_BOOB", "BOOB_58008", "BOOB_80085", "BOOB_8008"},
-		{"BOTANIST_EXACT", "MEANING_EXACT", "HOTBOX", "BOTANIST", "MEANING"},
-		{"JACKPOT_EXACT", "JACKPOT_SIX", "JACKPOT_FIVE", "JACKPOT_FOUR", "JACKPOT"},
-		{"CONTIGUOUS_SIXES", "CONTIGUOUS_FIVES", "CONTIGUOUS_QUADS", "CONTIGUOUS_TRIPS"},
-		{"E", "E_CONTAINS_5", "E_CONTAINS_4", "E_CONTAINS_3"},
-		{"NICE_EXACT", "VERY_VERY_NICE", "VERY_NICE", "NICE"},
-		{"QUINT_NINE", "QUAD_NINE", "TRIPLE_NINE", "DOUBLE_NINE"},
-		{"PI", "PI_CONTAINS_5", "PI_CONTAINS_4", "PI_CONTAINS_3"},
-		{"SIXTY_SEVEN_EXACT", "BRAINROT", "SIXTY_SEVEN_DOUBLE", "SIXTY_SEVEN"},
-		{"EON", "SEMI_EON", "DEEP_VOID_FIVE", "EPOCH", "SEMI_EPOCH", "DEEP_VOID_FOUR", "MILLENNIUM", "SEMI_MILLENNIUM", "DEEP_VOID_THREE", "CENTURY", "SEMI_CENTURY", "DEEP_VOID", "CLEAN"},
-		{"PAIRED_BOOKENDS", "BOOKENDS", "MIRROR_BOOKENDS"},
-		{"CALENDAR_EXACT", "GROUNDHOG_DAY", "CALENDAR", "ALWAYS"},
-		{"EMERGENCY_EXACT", "MAYDAY", "EMERGENCY"},
-		{"FRAMED_TRIPLE", "FRAMED_QUAD", "QUADS", "FIVE_OF_A_KIND", "TRIPS"},
-		{"ROYAL_FLUSH", "STRAIGHT_FLUSH", "STRAIGHT"},
-		{"BIG_BROTHER_EXACT", "BIG_BROTHER"},
-		{"CONTIGUOUS_BOAT", "BOAT"},
-		{"DEVIL_EXACT", "INFERNAL", "DEVIL"},
-		{"FIREFLY", "DUALITY"},
-		{"EIGHTY_SIX_EXACT", "EIGHTY_SIX"},
-		{"EQUILIBRIUM", "SANDWICH"},
-		{"EXACT_HELL", "HELL"},
-		{"DOUBLE_HOP", "HOPSCOTCH"},
-		{"LEET_EXACT", "LEET"},
-		{"UNIVERSAL_ANSWER", "DEEPER_MEANING"},
-		{"ASCENSION", "DECAY", "STEPS", "SLOPES"},
-		{"ORIENTATION_EXACT", "ORIENTATION"},
-		{"MOUNTAIN", "VALLEY", "MESA", "CANYON"},
-		{"MINI_ECHO", "RHYME"},
-		{"ERROR_EXACT", "ERROR"},
-		{"HILLS", "DUNES"},
-		{"PALINDROME", "POCKET_MIRROR"},
-		{"TAU", "TAU_SLICE_5", "TAU_SLICE_4"},
-		{"ULTIMEME_EXACT", "ULTIMEME"},
-	};
 
 	// Roll tiers mirror the site's percentile bands exactly.
 	public static final String[] TIERS = {
@@ -716,7 +671,6 @@ public final class RngdleGame {
 	}
 
 	private static final long DIGIT_MS = 1000L;
-	private static final long BADGE_MS = 1000L;
 
 	/** Per-badge reveal offsets from BADGES start: 0.3s widening to 1s. */
 	private static final List<Long> revealSchedule = new ArrayList<>();
@@ -735,12 +689,6 @@ public final class RngdleGame {
 
 	public static boolean playing() {
 		return phase != Phase.IDLE;
-	}
-
-	/** True once the digits are locked (anything but the scramble phase). */
-	/** True once the digits are locked (anything past the scramble phase). */
-	public static boolean numberLocked() {
-		return phase != Phase.DIGITS;
 	}
 
 	/** True once tier/rank may show (the rarity beat). */
@@ -772,10 +720,6 @@ public final class RngdleGame {
 		int g = Math.round(0xFF * (1f - t) + ((to >> 8) & 0xFF) * t);
 		int b = Math.round(0xFF * (1f - t) + (to & 0xFF) * t);
 		return (r << 16) | (g << 8) | b;
-	}
-
-	public static int number() {
-		return number;
 	}
 
 	/** Badges revealed so far (one per second, like the real scan). */
@@ -839,10 +783,6 @@ public final class RngdleGame {
 			return c != 0 ? c : Integer.compare(b.order(), a.order());
 		});
 		return out;
-	}
-
-	public static long totalEp() {
-		return totalEp;
 	}
 
 	/** Show script, all times from the roll start. Always six digit slots
@@ -943,16 +883,7 @@ public final class RngdleGame {
 	}
 
 	public static void start() {
-		testRoll = false;
 		startRoll(java.util.concurrent.ThreadLocalRandom.current().nextInt(1000001));
-	}
-
-	/** Forced roll for testing (fixed number, clamped to range). Never recorded. */
-	public static void startTest(Integer fixed) {
-		testRoll = true;
-		int n = fixed == null ? java.util.concurrent.ThreadLocalRandom.current().nextInt(1000001)
-			: Math.min(1000000, Math.max(0, fixed));
-		startRoll(n);
 	}
 
 	private static void startRoll(int n) {
@@ -1106,41 +1037,38 @@ public final class RngdleGame {
 	 */
 	private static void finish() {
 		try {
-			// Test rolls are previews only: no boards, no achievements, no chat.
-			if (!testRoll) {
-				long today = System.currentTimeMillis() / 86400000L;
-				if (NucleusMod.SPEEDRUN.rngdleBestDay != today || totalEp > NucleusMod.SPEEDRUN.rngdleBestEp) {
-					NucleusMod.SPEEDRUN.rngdleBestDay = today;
-					NucleusMod.SPEEDRUN.rngdleBestNum = number;
-					NucleusMod.SPEEDRUN.rngdleBestEp = totalEp;
-				}
-				java.util.List<String> top = NucleusMod.SPEEDRUN.rngdleBests;
-				top.add(number + "|" + totalEp);
-				top.sort((a, b) -> Long.compare(topEp(b), topEp(a)));
-				while (top.size() > 100) {
-					top.remove(top.size() - 1);
-				}
-				NucleusMod.SPEEDRUN.save();
-				int tier = tierOf(totalEp);
-				if (tier >= 6) {
-					Achievements.unlockFun("rng_top1");
-				}
-				// Dead median: within half a percent either side of the middle.
-				double frac = fracBelow(totalEp);
-				if (frac >= 0.495 && frac <= 0.505) {
-					Achievements.unlockFun("rng_avg");
-				}
-				if (tier <= 0) {
-					Achievements.unlockFun("rng_trash");
-				}
-				if (tier >= 5) {
-					Minecraft client = Minecraft.getInstance();
-					Component rarity = Component.literal(TIERS[tier])
-						.withColor(TIER_COLORS[tier] & 0xFFFFFF);
-					MadoChat.chat(client, Component.literal("§b[MNU] §fRNGdle number rolled : §e"
-						+ String.format(java.util.Locale.ROOT, "%,d", number) + " [")
-						.append(rarity).append(Component.literal("]")));
-				}
+			long today = System.currentTimeMillis() / 86400000L;
+			if (NucleusMod.SPEEDRUN.rngdleBestDay != today || totalEp > NucleusMod.SPEEDRUN.rngdleBestEp) {
+				NucleusMod.SPEEDRUN.rngdleBestDay = today;
+				NucleusMod.SPEEDRUN.rngdleBestNum = number;
+				NucleusMod.SPEEDRUN.rngdleBestEp = totalEp;
+			}
+			java.util.List<String> top = NucleusMod.SPEEDRUN.rngdleBests;
+			top.add(number + "|" + totalEp);
+			top.sort((a, b) -> Long.compare(topEp(b), topEp(a)));
+			while (top.size() > 100) {
+				top.remove(top.size() - 1);
+			}
+			NucleusMod.SPEEDRUN.save();
+			int tier = tierOf(totalEp);
+			if (tier >= 6) {
+				Achievements.unlockFun("rng_top1");
+			}
+			// Dead median: within half a percent either side of the middle.
+			double frac = fracBelow(totalEp);
+			if (frac >= 0.495 && frac <= 0.505) {
+				Achievements.unlockFun("rng_avg");
+			}
+			if (tier <= 0) {
+				Achievements.unlockFun("rng_trash");
+			}
+			if (tier >= 5) {
+				Minecraft client = Minecraft.getInstance();
+				Component rarity = Component.literal(TIERS[tier])
+					.withColor(TIER_COLORS[tier] & 0xFFFFFF);
+				MadoChat.chat(client, Component.literal("§b[MNU] §fRNGdle number rolled : §e"
+					+ String.format(java.util.Locale.ROOT, "%,d", number) + " [")
+					.append(rarity).append(Component.literal("]")));
 			}
 		} catch (Exception ignored) {
 		}
@@ -1172,25 +1100,6 @@ public final class RngdleGame {
 	/** Board entry EP ("number|ep"), -1 when malformed. */
 	public static long entryEp(String entry) {
 		return topEp(entry);
-	}
-
-	/** Config display: best today + all-time top 3, "-" placeholders when empty. */
-	public static java.util.List<String> statsLines() {
-		java.util.List<String> out = new java.util.ArrayList<>();
-		String today = bestTodayLine();
-		out.add(today == null ? "Best today: -" : today);
-		java.util.List<String> top = NucleusMod.SPEEDRUN.rngdleBests;
-		for (int i = 0; i < 3; i++) {
-			if (i < top.size()) {
-				int num = topNum(top.get(i));
-				long ep = topEp(top.get(i));
-				out.add((i + 1) + ". " + String.format(java.util.Locale.ROOT, "%,d", num)
-					+ " (" + TIERS[tierOf(ep)] + ")");
-			} else {
-				out.add((i + 1) + ". -");
-			}
-		}
-		return out;
 	}
 
 	/** Overlay fade 0..1: smooth ease in on appear, out over the last 0.6s. */
@@ -1278,14 +1187,6 @@ public final class RngdleGame {
 		}
 	}
 
-	private static long ipow(long b, int e) {
-		long r = 1;
-		for (int i = 0; i < e; i++) {
-			r *= b;
-		}
-		return r;
-	}
-
 	private static boolean isPerfectPower(int n, int exp) {
 		if (n <= 1) {
 			return true;
@@ -1305,17 +1206,6 @@ public final class RngdleGame {
 				return true;
 			}
 		}
-	}
-
-	private static boolean isPowerOf(int n, int k) {
-		if (n < k) {
-			return false;
-		}
-		long v = k;
-		while (v < n) {
-			v *= k;
-		}
-		return v == n;
 	}
 
 	private static boolean isPowerOfInclOne(int n, int k) {
@@ -1342,172 +1232,6 @@ public final class RngdleGame {
 			}
 		}
 		return true;
-	}
-
-	private static java.util.List<java.util.List<String>> partitions(String str, int count) {
-		java.util.List<java.util.List<String>> res = new java.util.ArrayList<>();
-		partitionsRec(str, count, 0, new java.util.ArrayList<>(), res);
-		return res;
-	}
-
-	private static void partitionsRec(String str, int count, int start, java.util.List<String> parts,
-		java.util.List<java.util.List<String>> res) {
-		if (parts.size() == count) {
-			if (start == str.length()) {
-				res.add(new java.util.ArrayList<>(parts));
-			}
-			return;
-		}
-		int remaining = count - parts.size();
-		for (int end = start + 1; end <= str.length() - (remaining - 1); end++) {
-			parts.add(str.substring(start, end));
-			partitionsRec(str, count, end, parts, res);
-			parts.remove(parts.size() - 1);
-		}
-	}
-
-	private static boolean validPart(String p) {
-		return p.length() == 1 || p.charAt(0) != '0';
-	}
-
-	private static boolean consecAsc(String str, int count, boolean multiDigit) {
-		for (java.util.List<String> parts : partitions(str, count)) {
-			boolean okParts = true;
-			for (String p : parts) {
-				if (!validPart(p)) {
-					okParts = false;
-					break;
-				}
-			}
-			if (!okParts) {
-				continue;
-			}
-			if (multiDigit) {
-				boolean anyMulti = false;
-				for (String p : parts) {
-					if (p.length() >= 2) {
-						anyMulti = true;
-						break;
-					}
-				}
-				if (!anyMulti) {
-					continue;
-				}
-			}
-			boolean ok = true;
-			int prev = Integer.parseInt(parts.get(0));
-			for (int i = 1; i < parts.size(); i++) {
-				int cur = Integer.parseInt(parts.get(i));
-				if (cur - prev != 1) {
-					ok = false;
-					break;
-				}
-				prev = cur;
-			}
-			if (ok) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	private static boolean consecScrambled(String str, int count) {
-		for (java.util.List<String> parts : partitions(str, count)) {
-			boolean okParts = true;
-			for (String p : parts) {
-				if (!validPart(p)) {
-					okParts = false;
-					break;
-				}
-			}
-			if (!okParts) {
-				continue;
-			}
-			int[] nums = new int[parts.size()];
-			for (int i = 0; i < parts.size(); i++) {
-				nums[i] = Integer.parseInt(parts.get(i));
-			}
-			int[] sorted = nums.clone();
-			java.util.Arrays.sort(sorted);
-			boolean isSet = true;
-			for (int i = 1; i < sorted.length; i++) {
-				if (sorted[i] - sorted[i - 1] != 1) {
-					isSet = false;
-					break;
-				}
-			}
-			if (!isSet) {
-				continue;
-			}
-			boolean asc = true;
-			for (int i = 1; i < nums.length; i++) {
-				if (nums[i] - nums[i - 1] != 1) {
-					asc = false;
-					break;
-				}
-			}
-			if (!asc) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	private static boolean containsConsec(String str, int count, boolean multiDigit) {
-		int minLen = count;
-		for (int i = 0; i < str.length(); i++) {
-			for (int j = i + minLen; j <= str.length(); j++) {
-				if (consecAsc(str.substring(i, j), count, multiDigit)) {
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-
-	private static boolean pairNearbyGen(String s, boolean multiDigit) {
-		java.util.List<int[]> subs = new java.util.ArrayList<>();
-		java.util.List<String> subStr = new java.util.ArrayList<>();
-		java.util.List<int[]> pos = new java.util.ArrayList<>();
-		for (int i = 0; i < s.length(); i++) {
-			for (int j = i + 1; j <= s.length(); j++) {
-				String t = s.substring(i, j);
-				if (!validPart(t)) {
-					continue;
-				}
-				subs.add(new int[]{Integer.parseInt(t), i, j});
-				subStr.add(t);
-			}
-		}
-		for (int[] a : subs) {
-			for (int[] b : subs) {
-				if (a[1] == b[1] && a[2] == b[2] && a[0] == b[0]) {
-					continue;
-				}
-				if (a[2] <= b[1] && b[1] - a[2] >= 1 && b[0] == a[0] + 1) {
-					if (!multiDigit || (a[2] - a[1] >= 2 || b[2] - b[1] >= 2)) {
-						return true;
-					}
-				}
-			}
-		}
-		return false;
-	}
-
-	private static boolean seqAsc(int[] d, int len) {
-		for (int i = 0; i + len <= d.length; i++) {
-			boolean ok = true;
-			for (int k = 1; k < len; k++) {
-				if (d[i + k] - d[i + k - 1] != 1) {
-					ok = false;
-					break;
-				}
-			}
-			if (ok) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	private static boolean straightRun(int[] d, int len) {
@@ -1681,24 +1405,6 @@ public final class RngdleGame {
 			}
 		}
 		return true;
-	}
-
-	private static int[] runLengths(String s) {
-		java.util.List<Integer> r = new java.util.ArrayList<>();
-		int i = 0;
-		while (i < s.length()) {
-			int j = i;
-			while (j < s.length() && s.charAt(j) == s.charAt(i)) {
-				j++;
-			}
-			r.add(j - i);
-			i = j;
-		}
-		int[] out = new int[r.size()];
-		for (int k = 0; k < r.size(); k++) {
-			out[k] = r.get(k);
-		}
-		return out;
 	}
 
 	private static boolean strobogrammatic(String s) {
@@ -1955,7 +1661,6 @@ public final class RngdleGame {
 	private static int[][] pPairNearby(String s) {
 		java.util.List<int[]> vals = new java.util.ArrayList<>();
 		java.util.List<String> strs = new java.util.ArrayList<>();
-		java.util.List<int[]> poses = new java.util.ArrayList<>();
 		for (int i = 0; i < s.length(); i++) {
 			for (int r = 1; r <= s.length() - i; r++) {
 				String a = s.substring(i, i + r);

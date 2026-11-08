@@ -1,6 +1,5 @@
 package com.nucleus.client;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -171,6 +170,24 @@ public final class Achievements {
 			VERY_HARD, Kind.EVENT, 0),
 		new Entry("bal_triple", "OHHH BABY A TRIPLE!", "Drop 3 Bal pets within 1 minute",
 			IMPOSSIBLE, Kind.EVENT, 0),
+		new Entry("logo10", "Curious", "Click the mod logo 10 times",
+			EASY, Kind.EVENT, 10),
+		new Entry("logo100", "Clicker", "Click the mod logo 100 times",
+			MEDIUM, Kind.EVENT, 100),
+		new Entry("logo1000", "Carpal Tunnel", "Click the mod logo 1,000 times",
+			HARD, Kind.EVENT, 1000),
+		new Entry("kaboom", "Kaboom", "Click the mod logo so fast it explodes",
+			MEDIUM, Kind.EVENT, 0),
+		new Entry("phoenix", "Phoenix", "Blow up the mod logo 10 times",
+			HARD, Kind.EVENT, 10),
+		new Entry("decorator", "Interior Decorator", "Switch menu themes 10 times",
+			EASY, Kind.EVENT, 10),
+		new Entry("seasons", "Seasonal Visitor", "Open the menu during 3 different seasons",
+			MEDIUM, Kind.EVENT, 3),
+		new Entry("nightshift", "Night Shift", "Finish a Nucleus run between 2 and 5 AM",
+			MEDIUM, Kind.EVENT, 0),
+		new Entry("ouch", "Ouch", "Have the gambling wheel land right next to Divan's Alloy",
+			MEDIUM, Kind.EVENT, 0),
 	};
 
 	/** Old bundle drop ids -> new split entries (kept for JackpotDetector). */
@@ -213,8 +230,89 @@ public final class Achievements {
 		return NucleusMod.SPEEDRUN.unlockedFun.contains(id);
 	}
 
+	/** Menu achievements (logo, themes, seasons): always visible, never hidden behind hints. */
+	public static boolean isLogoEntry(Entry e) {
+		String id = e.id();
+		return id.startsWith("logo") || id.equals("kaboom") || id.equals("phoenix") || id.equals("decorator")
+			|| id.equals("seasons");
+	}
+
+	/** Current count for counter achievements (logo clicks, explosions...), or -1 if it isn't one. */
+	public static long counterValue(Entry e) {
+		var st = NucleusMod.SPEEDRUN;
+		return switch (e.id()) {
+			case "logo10", "logo100", "logo1000" -> st.logoClicks;
+			case "phoenix" -> st.logoExplosions;
+			case "decorator" -> st.themeSwitches;
+			case "seasons" -> st.seasonsSeen.size();
+			default -> -1L;
+		};
+	}
+
+	private static String counterUnit(Entry e) {
+		return switch (e.id()) {
+			case "phoenix" -> "explosions";
+			case "decorator" -> "switches";
+			case "seasons" -> "seasons";
+			default -> "clicks";
+		};
+	}
+
+	private static void checkCounter(String id) {
+		Entry e = entryById(id);
+		if (e != null && !isUnlocked(id) && counterValue(e) >= e.threshold()) {
+			unlockFun(id);
+		}
+	}
+
+	/** A theme was picked in the menu (a different one than before). */
+	public static void onThemeSwitched() {
+		NucleusMod.SPEEDRUN.themeSwitches++;
+		checkCounter("decorator");
+		NucleusMod.SPEEDRUN.save();
+	}
+
+	/** The menu opened: remember today's season (by date, whatever the toggle says). */
+	public static void onMenuOpened() {
+		NucleusSeason.Season s = NucleusSeason.today();
+		if (s != NucleusSeason.Season.NONE && NucleusMod.SPEEDRUN.seasonsSeen.add(s.name())) {
+			checkCounter("seasons");
+			NucleusMod.SPEEDRUN.save();
+		}
+	}
+
+	/** The wheel came to rest on a slice next to Divan's Alloy (real spins only). */
+	public static void onWheelNextToAlloy() {
+		unlockFun("ouch");
+	}
+
+	/** Menu logo clicked (from the config screen); {@code exploded} = this click blew it up. */
+	public static void onLogoClick(boolean exploded) {
+		long clicks = ++NucleusMod.SPEEDRUN.logoClicks;
+		boolean save = clicks % 10 == 0;
+		for (Entry e : ENTRIES) {
+			if (e.id().startsWith("logo") && e.threshold() > 0 && clicks >= e.threshold() && !isUnlocked(e.id())) {
+				unlockFun(e.id());
+			}
+		}
+		if (exploded) {
+			unlockFun("kaboom");
+			NucleusMod.SPEEDRUN.logoExplosions++;
+			checkCounter("phoenix");
+			save = true;
+		}
+		if (save) {
+			NucleusMod.SPEEDRUN.save();
+		}
+	}
+
 	public static String progressText(Entry e) {
 		boolean done = isUnlocked(e.id());
+		long c = counterValue(e);
+		if (c >= 0) {
+			String unit = counterUnit(e);
+			return done ? c + " " + unit : Math.min(c, e.threshold()) + "/" + e.threshold() + " " + unit;
+		}
 		return switch (e.kind()) {
 			case COUNT -> {
 				long have = NucleusMod.SPEEDRUN.completedRuns;
@@ -269,11 +367,17 @@ public final class Achievements {
 	/** Called after a run is recorded; announces newly unlocked tiers. */
 	public static void onRunFinished(long totalMs) {
 		NucleusMod.SPEEDRUN.completedRuns++;
-		judgeRunStreaks();
 		recheck(true);
 		checkRunGear();
 		if (totalMs >= 3_600_000L) {
 			unlockFun("slow");
+		}
+		try {
+			int hour = java.time.LocalTime.now().getHour();
+			if (hour >= 2 && hour < 5) {
+				unlockFun("nightshift");
+			}
+		} catch (Exception ignored) {
 		}
 		if (totalMs > 3000L && totalMs < 30_000L) {
 			unlockFun("cheater");
@@ -376,8 +480,60 @@ public final class Achievements {
 		}
 	}
 
+	// ---------- held presentations (no spoilers during the wheel) ----------
+
+	/** Unlock chats/alerts earned while the wheel is spinning, shown after it ends. */
+	private static final java.util.ArrayDeque<Runnable> HELD = new java.util.ArrayDeque<>();
+	private static long heldReleaseAt = 0L;
+	/** Quiet time after the wheel before the first held unlock, and between them. */
+	private static final long HELD_AFTER_MS = 1200L;
+	private static final long HELD_GAP_MS = 1800L;
+
+	private static boolean wheelBusy() {
+		try {
+			return JackpotAnimation.isActive();
+		} catch (Exception ignored) {
+			return false;
+		}
+	}
+
+	/**
+	 * Shows an unlock now, or holds it while the jackpot wheel is playing
+	 * so a chat line, jingle or title can never give the result away (an
+	 * Alloy achievement popping as the wheel starts, say). Held ones play
+	 * one by one once the wheel is done.
+	 */
+	private static void present(Runnable show) {
+		if (wheelBusy() || !HELD.isEmpty()) {
+			HELD.add(show);
+			heldReleaseAt = Math.max(heldReleaseAt, System.currentTimeMillis() + HELD_AFTER_MS);
+			return;
+		}
+		show.run();
+	}
+
+	/** Releases held unlocks after the wheel (called every client tick). */
+	private static void releaseHeld() {
+		if (HELD.isEmpty()) {
+			return;
+		}
+		long now = System.currentTimeMillis();
+		if (wheelBusy()) {
+			heldReleaseAt = now + HELD_AFTER_MS;
+			return;
+		}
+		if (now >= heldReleaseAt) {
+			Runnable next = HELD.poll();
+			heldReleaseAt = now + HELD_GAP_MS;
+			try {
+				next.run();
+			} catch (Exception ignored) {
+			}
+		}
+	}
+
 	private static void announce(Entry e) {
-		celebrate(e);
+		present(() -> celebrate(e));
 		NucleusMod.LOGGER.info("Achievement unlocked: {} [{}]", e.name(), TIER_NAMES[e.tier()]);
 	}
 
@@ -386,7 +542,10 @@ public final class Achievements {
 		Minecraft client = Minecraft.getInstance();
 		MadoChat.chat(client, Component.literal("§b[MNU] §fAchievement unlocked: §f")
 			.append(hoverable(titleComponent(e), e.desc())));
-		playUnlockSound(client);
+		// The jingle is saved for the big ones: Hard and above.
+		if (e.tier() >= HARD) {
+			playUnlockSound(client);
+		}
 		showAlert(e);
 	}
 
@@ -452,6 +611,37 @@ public final class Achievements {
 		return body;
 	}
 
+	/** RGB per character of the card name: the tier gradient, darkened while locked. */
+	public static int[] nameColors(Entry e, boolean done) {
+		int from;
+		int to;
+		if (done) {
+			from = TIER_COLORS[e.tier()] & 0xFFFFFF;
+			to = TIER_GRADIENT_TO[e.tier()] & 0xFFFFFF;
+		} else if (e.tier() == IMPOSSIBLE) {
+			from = 0x707070;
+			to = 0x3A3A3A;
+		} else {
+			from = darken(TIER_COLORS[e.tier()] & 0xFFFFFF);
+			to = darken(TIER_GRADIENT_TO[e.tier()] & 0xFFFFFF);
+		}
+		int n = e.name().length();
+		int[] out = new int[n];
+		for (int i = 0; i < n; i++) {
+			float t = n <= 1 ? 0f : (float) i / (float) (n - 1);
+			int r = Math.round(((from >> 16) & 0xFF) * (1f - t) + ((to >> 16) & 0xFF) * t);
+			int g = Math.round(((from >> 8) & 0xFF) * (1f - t) + ((to >> 8) & 0xFF) * t);
+			int b = Math.round((from & 0xFF) * (1f - t) + (to & 0xFF) * t);
+			out[i] = (r << 16) | (g << 8) | b;
+		}
+		return out;
+	}
+
+	/** Unlocked Very Hard / Impossible names get a scrambling glyph on each side. */
+	public static boolean hasGlitchEdges(Entry e) {
+		return e.tier() == VERY_HARD || e.tier() == IMPOSSIBLE;
+	}
+
 	/** Per-character RGB lerp across the whole string. */
 	private static net.minecraft.network.chat.MutableComponent gradient(String text, int from, int to) {
 		net.minecraft.network.chat.MutableComponent out = Component.empty();
@@ -487,43 +677,6 @@ public final class Achievements {
 		int g = (int) (((rgb >> 8) & 0xFF) * 0.45);
 		int b = (int) ((rgb & 0xFF) * 0.45);
 		return (r << 16) | (g << 8) | b;
-	}
-
-	/**
-	 * Visual-only preview: chat + alert for a random entry of the tier,
-	 * without unlocking anything. Used by /madodebug achievement.
-	 *
-	 * @return message describing what was shown, or null for a bad tier.
-	 */
-	public static String previewTier(String arg) {
-		if (arg == null) {
-			return null;
-		}
-		String norm = arg.toLowerCase(java.util.Locale.ROOT).replaceAll("[\\s_-]", "");
-		int tier = -1;
-		for (int i = 0; i < TIER_NAMES.length; i++) {
-			String name = TIER_NAMES[i].toLowerCase(java.util.Locale.ROOT).replaceAll("[\\s_-]", "");
-			if (name.equals(norm) || name.startsWith(norm) && !norm.isEmpty()
-				|| String.valueOf(i).equals(norm)) {
-				tier = i;
-				break;
-			}
-		}
-		if (tier < 0) {
-			return null;
-		}
-		List<Entry> pool = new ArrayList<>();
-		for (Entry e : ENTRIES) {
-			if (e.tier() == tier) {
-				pool.add(e);
-			}
-		}
-		if (pool.isEmpty()) {
-			return null;
-		}
-		Entry pick = pool.get(java.util.concurrent.ThreadLocalRandom.current().nextInt(pool.size()));
-		celebrate(pick);
-		return pick.name() + " [" + TIER_NAMES[pick.tier()] + "]";
 	}
 
 	/** Wraps a name component with a "how you got it" hover tooltip. */
@@ -584,21 +737,21 @@ public final class Achievements {
 		new StreakDef("claw", "quick claw", "b2b_claw", null),
 	};
 
-	private static final Map<String, Integer> runStreaks = new HashMap<>();
+	/** Streak items in the bundle block being read. */
 	private static final java.util.Set<String> bundleSeen = new java.util.HashSet<>();
 	private static boolean bundleOpen = false;
-	/** Streak items seen at least once in the current run (unions many bundles). */
-	private static final java.util.Set<String> runSeen = new java.util.HashSet<>();
+	/** Loot lines read in the open block (an empty block is never judged). */
+	private static int bundleLines = 0;
 
 	/** One framed bundle loot line: remember which streak items showed up. */
 	public static void recordBundleItem(String normLower) {
-		if (normLower == null) {
+		if (normLower == null || !bundleOpen) {
 			return;
 		}
+		bundleLines++;
 		for (StreakDef d : STREAKS) {
 			if (normLower.contains(d.match())) {
 				bundleSeen.add(d.key());
-				runSeen.add(d.key());
 			}
 		}
 	}
@@ -606,63 +759,50 @@ public final class Achievements {
 	/** A bundle block started (header seen): streaks now track this block. */
 	public static void openBundle() {
 		bundleOpen = true;
+		bundleLines = 0;
+		bundleSeen.clear();
 	}
 
-	/** A bundle block ended: folds its items into the current run (no judging here). */
+	/**
+	 * A bundle block ended: judge it. Every Nucleus run ends with exactly
+	 * one loot bundle, and Hypixel prints it right AFTER the 5th crystal
+	 * (after the run timer has already stopped), so the bundle itself is
+	 * the unit: an item in this bundle extends its streak, a bundle
+	 * without it resets the streak to 0. Unlock at 2 (pair) and 3 (triple).
+	 * Streaks are saved, so a relog between runs doesn't break them.
+	 */
 	public static void closeBundle() {
 		if (!bundleOpen) {
 			return;
 		}
 		bundleOpen = false;
-		runSeen.addAll(bundleSeen);
-		bundleSeen.clear();
-	}
-
-	/** A run started: previous run's items must never leak into this one. */
-	public static void onRunStarted() {
-		runSeen.clear();
-		bundleSeen.clear();
-		bundleOpen = false;
-	}
-
-	/** Run cancelled or lobby left: drops everything without judging. */
-	public static void abortRun() {
-		runSeen.clear();
-		bundleSeen.clear();
-		bundleOpen = false;
-	}
-
-	/** Mid-bundle server leave: drop the partial block, keep streak counts. */
-	public static void resetBundle() {
-		bundleOpen = false;
-		bundleSeen.clear();
-	}
-
-	/**
-	 * Back-to-back judging, once per finished run: a run containing the
-	 * item increments its counter, a run without it resets to 0, unlock at
-	 * 2 (pair) and 3 (triple). A straddling bundle block is flushed into
-	 * this run first; later blocks belong to the next run.
-	 */
-	private static void judgeRunStreaks() {
+		if (bundleLines == 0) {
+			bundleSeen.clear();
+			return;
+		}
 		try {
-			if (bundleOpen) {
-				closeBundle();
-			}
+			Map<String, Integer> streaks = NucleusMod.SPEEDRUN.bundleStreaks;
 			for (StreakDef d : STREAKS) {
-				int s = runSeen.contains(d.key()) ? runStreaks.getOrDefault(d.key(), 0) + 1 : 0;
-				runStreaks.put(d.key(), s);
+				int s = bundleSeen.contains(d.key()) ? streaks.getOrDefault(d.key(), 0) + 1 : 0;
+				streaks.put(d.key(), s);
 				if (s == 2) {
 					unlockFun(d.pairId());
 				} else if (s >= 3 && d.tripleId() != null) {
 					unlockFun(d.tripleId());
 				}
 			}
+			NucleusMod.SPEEDRUN.save();
 		} catch (Exception ignored) {
 		}
-		runSeen.clear();
 		bundleSeen.clear();
+		bundleLines = 0;
+	}
+
+	/** Mid-bundle server leave: drop the partial block, keep streak counts. */
+	public static void resetBundle() {
 		bundleOpen = false;
+		bundleLines = 0;
+		bundleSeen.clear();
 	}
 
 	public static String funName(String id) {
@@ -690,13 +830,12 @@ public final class Achievements {
 			NucleusMod.LOGGER.info("Achievement unlocked: {}", funName(id));
 			Entry e = entryById(id);
 			if (e != null) {
-				celebrate(e);
+				present(() -> celebrate(e));
 				return;
 			}
-		Minecraft client = Minecraft.getInstance();
-		MadoChat.chat(client, Component.literal("§b[MNU] §fAchievement unlocked: §f")
-			.append(hoverable(Component.literal(funName(id)), funDesc(id))));
-		playUnlockSound(client);
+			present(() -> MadoChat.chat(Minecraft.getInstance(),
+				Component.literal("§b[MNU] §fAchievement unlocked: §f")
+					.append(hoverable(Component.literal(funName(id)), funDesc(id)))));
 		} else if (REPEATABLE.contains(id)) {
 			// Already unlocked: chat-only repeat with running total, no
 			// sound and no screen alert.
@@ -709,8 +848,8 @@ public final class Achievements {
 			Component name = e != null
 				? hoverable(titleComponent(e, false), e.desc())
 				: Component.literal(funName(id));
-			MadoChat.chat(client, Component.literal("§b[MNU] §fAchievement repeated §7(x" + n + " total)§f: ")
-				.append(name));
+			present(() -> MadoChat.chat(client,
+				Component.literal("§b[MNU] §fAchievement repeated §7(x" + n + " total)§f: ").append(name)));
 		}
 	}
 
@@ -766,6 +905,11 @@ public final class Achievements {
 
 	/** Own Bal pet obtain (name matched, rarity inline): timestamps + counters. */
 	public static void onBalPetDrop(boolean legendary, long nowMs) {
+		// Hypixel's own "has obtained [Lvl 1] EPIC/LEGENDARY Bal!" line is the
+		// only place the rarity is printed, so the pop fires from here.
+		if (NucleusMod.CONFIG.balPetAnimEnabled) {
+			BalPetDrop.start(legendary);
+		}
 		List<Long> drops = legendary
 			? NucleusMod.SPEEDRUN.legendaryBalDrops
 			: NucleusMod.SPEEDRUN.epicBalDrops;
@@ -907,6 +1051,7 @@ public final class Achievements {
 	}
 
 	public static void tick(Minecraft client) {
+		releaseHeld();
 		tickCount++;
 		long now = System.currentTimeMillis();
 

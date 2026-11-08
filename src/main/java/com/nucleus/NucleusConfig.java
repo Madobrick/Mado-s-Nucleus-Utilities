@@ -2,15 +2,23 @@ package com.nucleus;
 
 import java.io.IOException;
 import java.io.Reader;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonParseException;
 
 import net.fabricmc.loader.api.FabricLoader;
 
+/**
+ * Field initializers are the defaults: Gson builds through the no-arg
+ * constructor, so keys missing from the file keep them, and reset() just
+ * copies a fresh instance.
+ */
 public class NucleusConfig {
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
@@ -45,6 +53,12 @@ public class NucleusConfig {
 
 	// --- Bal timer (Crystal Hollows) ---
 	public boolean balTimerEnabled = false;
+	/** "Bal: spawned/despawned/ded" line, drawn with the Bal timer HUD. */
+	public boolean balDetectorEnabled = false;
+	/** Quick celebration (rarity + 3D pop) when a Bal pet drops. */
+	public boolean balPetAnimEnabled = true;
+	/** Run profit: you hand Professor Robot a Precursor Apparatus instead of the 6 parts. */
+	public boolean nucleusUsesApparatus = false;
 	public int balTimerX = 10;
 	public int balTimerY = 80;
 	/** HUD text scale 0.5-3.0. */
@@ -64,6 +78,14 @@ public class NucleusConfig {
 	/** Tracker rate line: false = tools/hour, true = sets/hour. */
 	public boolean scavengerSetsPerHour = false;
 
+	// --- Terror (Hydra Strike) armor stacks (Crimson Isles) ---
+	public boolean terrorStacksEnabled = false;
+	public int terrorStacksX = 10;
+	public int terrorStacksY = 140;
+	public float terrorStacksScale = 2.0f;
+	/** One-time 1.4.0 migration: the overlay's 1x default became 2x. */
+	public boolean terrorStacksScaleBumped = false;
+
 	// --- Divan chest locator (Mines of Divan, packet-driven) ---
 	public boolean divanChestEnabled = false;
 	public boolean divanChestText = true;
@@ -82,9 +104,6 @@ public class NucleusConfig {
 	/** Auto-screenshots top 1% (Mythic) RNGdle rolls. */
 	public boolean rngdleAutoScreenshot = false;
 	public int divanChestColor = 0xFF55FF55;
-	public int divanChestHudX = 10;
-	public int divanChestHudY = 140;
-	public float divanChestHudScale = 1.0f;
 
 	// --- Hollows alerts ---
 	/** Wrong-pet warning in the Mines without the Mole (needs Pet tab widget). */
@@ -115,7 +134,6 @@ public class NucleusConfig {
 
 	// --- Mob highlights (colors follow the speedrun splits) ---
 	public boolean mobHighlightEnabled = false;
-	public boolean mobHighlightWalls = true;
 
 	// --- Jackpot rare-drop animation ---
 	public boolean jackpotEnabled = true;
@@ -127,9 +145,6 @@ public class NucleusConfig {
 	public int jackpotSpeedWheelPct = 100;
 	/** Third-part speed percent 50-200: the celebration screen (100 = normal). */
 	public int jackpotSpeedCelebPct = 100;
-	/** Old single speed value, kept only to migrate pre-split configs. */
-	@Deprecated
-	public int jackpotSpeedPct = 100;
 
 	/** 1-in-N odds for the consolation lottery on bundle loot lines. */
 	public int jackpotOddsJaderald = 3;
@@ -160,6 +175,16 @@ public class NucleusConfig {
 
 	/** SAFE MODE: blocks every /warp except /warp nucleus|cn. */
 	public boolean safeMode = false;
+	/** Config menu theme id (see NucleusTheme); locked themes fall back to "space". */
+	public String menuTheme = "space";
+	/** Gambling wheel sound pack id (see NucleusSoundPack). */
+	public String gambleSoundPack = "classic";
+	/** Theme colours, light bands and particles behind the gambling animation. */
+	public boolean themedWheelFx = true;
+	/** Seasonal touches in the menu (snow at Christmas, bats at Halloween...). */
+	public boolean seasonalEffects = true;
+	/** Warn on entering a Hollows lobby you were already in, or one over 2 weeks old. */
+	public boolean badLobbyAlertEnabled = true;
 
 	/** Auto safe mode: switches safe mode on after N runs in one lobby. */
 	public boolean autoSafeMode = false;
@@ -182,91 +207,7 @@ public class NucleusConfig {
 
 	/** Restores every setting to defaults (records like run history live elsewhere). */
 	public void reset() {
-		madoBrickEnabled = true;
-		templeAutoPlace = true;
-		waypointsThroughWalls = true;
-		waypointText = false;
-		templeLinkLines = false;
-		showWaypoint1 = true;
-		showWaypoint2 = true;
-		showWaypoint3 = true;
-		waypointOutlineWidth = 3.0f;
-		waypoint1Color = 0xFF55FFFF;
-		waypoint2Color = 0xFF55FF55;
-		waypoint3Color = 0xFFFFAA00;
-		showCustomWaypoint = true;
-		customWaypointColor = 0xFFFFFFFF;
-		waypointDimBeyondEtherwarp = true;
-		balTimerEnabled = false;
-		balTimerX = 10;
-		balTimerY = 80;
-		balTimerScale = 1.0f;
-		lobbyDayEnabled = false;
-		lobbyDayX = 10;
-		lobbyDayY = 100;
-		lobbyDayScale = 1.0f;
-		scavengerEnabled = false;
-		scavengerX = 10;
-		scavengerY = 120;
-		scavengerScale = 1.0f;
-		scavengerSetsPerHour = false;
-		divanChestEnabled = false;
-		divanChestText = true;
-		divanMuteDetector = false;
-		rngdleEnabled = true;
-		rngdleVolume = 100;
-		rngdleHudX = -1;
-		rngdleHudY = -1;
-		rngdleHudScale = 1.0f;
-		rngdleShowDescriptions = false;
-		rngdleAutoScreenshot = false;
-		divanChestColor = 0xFF55FF55;
-		divanChestHudX = 10;
-		divanChestHudY = 140;
-		divanChestHudScale = 1.0f;
-		petAlertEnabled = false;
-		lowToolsAlertEnabled = false;
-		alertOffX = 0;
-		alertOffY = -70;
-		alertScale = 1.0f;
-		objectiveSoundOn = true;
-		objectiveSoundVolume = 80;
-		achievementVolume = 80;
-		bypassMinecraftVolume = false;
-		objectiveSoundId = "minecraft:block.bone_block.place";
-		customSoundEnabled = false;
-		customSoundPath = "";
-		mobHighlightEnabled = false;
-		mobHighlightWalls = true;
-		jackpotEnabled = true;
-		jackpotVolume = 100;
-		jackpotSpeedEarlyPct = 100;
-		jackpotSpeedWheelPct = 100;
-		jackpotSpeedCelebPct = 100;
-		jackpotSpeedPct = 100;
-		jackpotOddsJaderald = 3;
-		jackpotOddsFragment = 8;
-		jackpotOddsMixture = 3;
-		jackpotOddsFlawless = 1;
-		jackpotZoomPct = 50;
-		hideBundle = false;
-		jackpotPreview = "random";
-		timerBg = 50;
-		quietChat = false;
-		speedrunEnabled = true;
-		lobbySummary = true;
-		safeMode = false;
-		autoSafeMode = false;
-		autoSafeModeRuns = 3;
-		tabWarnEnabled = true;
-		soundYolkar = true;
-		soundCrystal = true;
-		soundApparatus = true;
-		soundTool = true;
-		soundKey = true;
-		soundBal = true;
-		soundPlace = true;
-		soundChest = true;
+		copyFrom(new NucleusConfig());
 		save();
 	}
 
@@ -277,160 +218,10 @@ public class NucleusConfig {
 		try (Reader reader = Files.newBufferedReader(CONFIG_PATH, StandardCharsets.UTF_8)) {
 			NucleusConfig loaded = GSON.fromJson(reader, NucleusConfig.class);
 			if (loaded != null) {
-				madoBrickEnabled = loaded.madoBrickEnabled;
-				templeAutoPlace = loaded.templeAutoPlace;
-				waypointsThroughWalls = loaded.waypointsThroughWalls;
-				waypointText = loaded.waypointText;
-				templeLinkLines = loaded.templeLinkLines;
-				showWaypoint1 = loaded.showWaypoint1;
-				showWaypoint2 = loaded.showWaypoint2;
-				showWaypoint3 = loaded.showWaypoint3;
-				if (loaded.waypointOutlineWidth > 0.1f && loaded.waypointOutlineWidth <= 10.0f) {
-					waypointOutlineWidth = loaded.waypointOutlineWidth;
-				}
-				waypoint1Color = loaded.waypoint1Color;
-				waypoint2Color = loaded.waypoint2Color;
-				waypoint3Color = loaded.waypoint3Color;
-			showCustomWaypoint = loaded.showCustomWaypoint;
-			if (loaded.customWaypointColor != 0) {
-				customWaypointColor = loaded.customWaypointColor;
+				loaded.sanitize();
+				copyFrom(loaded);
 			}
-			waypointDimBeyondEtherwarp = loaded.waypointDimBeyondEtherwarp;
-				balTimerEnabled = loaded.balTimerEnabled;
-				if (loaded.balTimerX != 0 || loaded.balTimerY != 0) {
-					balTimerX = loaded.balTimerX;
-					balTimerY = loaded.balTimerY;
-				}
-			if (loaded.balTimerScale >= 0.5f && loaded.balTimerScale <= 3.0f) {
-				balTimerScale = loaded.balTimerScale;
-			}
-				lobbyDayEnabled = loaded.lobbyDayEnabled;
-				if (loaded.lobbyDayX != 0 || loaded.lobbyDayY != 0) {
-					lobbyDayX = loaded.lobbyDayX;
-					lobbyDayY = loaded.lobbyDayY;
-				}
-				if (loaded.lobbyDayScale >= 0.5f && loaded.lobbyDayScale <= 3.0f) {
-					lobbyDayScale = loaded.lobbyDayScale;
-				}
-			scavengerEnabled = loaded.scavengerEnabled;
-			if (loaded.scavengerX != 0 || loaded.scavengerY != 0) {
-				scavengerX = loaded.scavengerX;
-				scavengerY = loaded.scavengerY;
-			}
-			if (loaded.scavengerScale >= 0.5f && loaded.scavengerScale <= 3.0f) {
-				scavengerScale = loaded.scavengerScale;
-			}
-			scavengerSetsPerHour = loaded.scavengerSetsPerHour;
-			divanChestEnabled = loaded.divanChestEnabled;
-			divanChestText = loaded.divanChestText;
-			divanMuteDetector = loaded.divanMuteDetector;
-			rngdleEnabled = loaded.rngdleEnabled;
-			if (loaded.rngdleVolume >= 0 && loaded.rngdleVolume <= 200) {
-				rngdleVolume = loaded.rngdleVolume;
-			}
-			rngdleHudX = loaded.rngdleHudX;
-			rngdleHudY = loaded.rngdleHudY;
-			rngdleShowDescriptions = loaded.rngdleShowDescriptions;
-			rngdleAutoScreenshot = loaded.rngdleAutoScreenshot;
-			if (loaded.rngdleHudScale >= 0.5f && loaded.rngdleHudScale <= 3.0f) {
-				rngdleHudScale = loaded.rngdleHudScale;
-			}
-			if (loaded.divanChestColor != 0) {
-				// Migrate old orange default to green.
-				divanChestColor = loaded.divanChestColor == 0xFFFFAA00 ? 0xFF55FF55 : loaded.divanChestColor;
-			}
-			if (loaded.divanChestHudX != 0 || loaded.divanChestHudY != 0) {
-				divanChestHudX = loaded.divanChestHudX;
-				divanChestHudY = loaded.divanChestHudY;
-			}
-			if (loaded.divanChestHudScale >= 0.5f && loaded.divanChestHudScale <= 3.0f) {
-				divanChestHudScale = loaded.divanChestHudScale;
-			}
-				petAlertEnabled = loaded.petAlertEnabled;
-				lowToolsAlertEnabled = loaded.lowToolsAlertEnabled;
-				alertOffX = loaded.alertOffX;
-				alertOffY = loaded.alertOffY;
-				if (loaded.alertScale >= 0.5f && loaded.alertScale <= 3.0f) {
-					alertScale = loaded.alertScale;
-				}
-				objectiveSoundOn = loaded.objectiveSoundOn;
-			if (loaded.objectiveSoundVolume >= 0 && loaded.objectiveSoundVolume <= 200) {
-				objectiveSoundVolume = loaded.objectiveSoundVolume;
-			}
-			if (loaded.achievementVolume >= 0 && loaded.achievementVolume <= 200) {
-				achievementVolume = loaded.achievementVolume;
-			}
-				bypassMinecraftVolume = loaded.bypassMinecraftVolume;
-				if (loaded.objectiveSoundId != null && !loaded.objectiveSoundId.isBlank()) {
-					objectiveSoundId = loaded.objectiveSoundId;
-				}
-				customSoundEnabled = loaded.customSoundEnabled;
-				if (loaded.customSoundPath != null) {
-					customSoundPath = loaded.customSoundPath;
-				}
-			mobHighlightEnabled = loaded.mobHighlightEnabled;
-			mobHighlightWalls = loaded.mobHighlightWalls;
-			jackpotEnabled = loaded.jackpotEnabled;
-			if (loaded.jackpotSpeedEarlyPct >= 50 && loaded.jackpotSpeedEarlyPct <= 200) {
-				jackpotSpeedEarlyPct = loaded.jackpotSpeedEarlyPct;
-			} else if (loaded.jackpotSpeedPct >= 50 && loaded.jackpotSpeedPct <= 200) {
-				// Migrate the old single speed value to all three parts.
-				jackpotSpeedEarlyPct = loaded.jackpotSpeedPct;
-			}
-			if (loaded.jackpotSpeedWheelPct >= 50 && loaded.jackpotSpeedWheelPct <= 200) {
-				jackpotSpeedWheelPct = loaded.jackpotSpeedWheelPct;
-			} else if (loaded.jackpotSpeedPct >= 50 && loaded.jackpotSpeedPct <= 200) {
-				jackpotSpeedWheelPct = loaded.jackpotSpeedPct;
-			}
-			if (loaded.jackpotSpeedCelebPct >= 50 && loaded.jackpotSpeedCelebPct <= 200) {
-				jackpotSpeedCelebPct = loaded.jackpotSpeedCelebPct;
-			} else if (loaded.jackpotSpeedPct >= 50 && loaded.jackpotSpeedPct <= 200) {
-				jackpotSpeedCelebPct = loaded.jackpotSpeedPct;
-			}
-			if (loaded.jackpotOddsJaderald >= 1 && loaded.jackpotOddsJaderald <= 1000000) {
-				jackpotOddsJaderald = loaded.jackpotOddsJaderald;
-			}
-			if (loaded.jackpotOddsFragment >= 1 && loaded.jackpotOddsFragment <= 1000000) {
-				jackpotOddsFragment = loaded.jackpotOddsFragment;
-			}
-			if (loaded.jackpotOddsMixture >= 1 && loaded.jackpotOddsMixture <= 1000000) {
-				jackpotOddsMixture = loaded.jackpotOddsMixture;
-			}
-			if (loaded.jackpotOddsFlawless >= 1 && loaded.jackpotOddsFlawless <= 1000000) {
-				jackpotOddsFlawless = loaded.jackpotOddsFlawless;
-			}
-			if (loaded.jackpotZoomPct >= 0 && loaded.jackpotZoomPct <= 100) {
-				jackpotZoomPct = loaded.jackpotZoomPct;
-			}
-			hideBundle = loaded.hideBundle;
-			if (loaded.jackpotPreview != null && !loaded.jackpotPreview.isBlank()) {
-				jackpotPreview = loaded.jackpotPreview.trim().toLowerCase();
-			}
-			if (loaded.jackpotVolume >= 0 && loaded.jackpotVolume <= 200) {
-				jackpotVolume = loaded.jackpotVolume;
-			}
-				if (loaded.timerBg >= 0 && loaded.timerBg <= 100) {
-					timerBg = loaded.timerBg;
-				}
-				quietChat = loaded.quietChat;
-			speedrunEnabled = loaded.speedrunEnabled;
-			lobbySummary = loaded.lobbySummary;
-			safeMode = loaded.safeMode;
-			autoSafeMode = loaded.autoSafeMode;
-			if (loaded.autoSafeModeRuns >= 1 && loaded.autoSafeModeRuns <= 20) {
-				autoSafeModeRuns = loaded.autoSafeModeRuns;
-			}
-			tabWarnEnabled = loaded.tabWarnEnabled;
-			soundYolkar = loaded.soundYolkar;
-			soundCrystal = loaded.soundCrystal;
-			soundApparatus = loaded.soundApparatus;
-			soundTool = loaded.soundTool;
-			soundKey = loaded.soundKey;
-			soundBal = loaded.soundBal;
-			soundPlace = loaded.soundPlace;
-			soundChest = loaded.soundChest;
-			}
-		} catch (IOException e) {
+		} catch (IOException | JsonParseException e) {
 			NucleusMod.LOGGER.warn("Failed to read Nucleus config: {}", e.getMessage());
 		}
 	}
@@ -441,6 +232,74 @@ public class NucleusConfig {
 			Files.writeString(CONFIG_PATH, GSON.toJson(this), StandardCharsets.UTF_8);
 		} catch (IOException e) {
 			NucleusMod.LOGGER.warn("Failed to save Nucleus config: {}", e.getMessage());
+		}
+	}
+
+	/** Out-of-range or hand-broken values fall back to their defaults. */
+	private void sanitize() {
+		NucleusConfig d = new NucleusConfig();
+		if (!(waypointOutlineWidth > 0.1f && waypointOutlineWidth <= 10.0f)) {
+			waypointOutlineWidth = d.waypointOutlineWidth;
+		}
+		if (customWaypointColor == 0) {
+			customWaypointColor = d.customWaypointColor;
+		}
+		// 0 is unset; the old orange default migrates to green.
+		if (divanChestColor == 0 || divanChestColor == 0xFFFFAA00) {
+			divanChestColor = d.divanChestColor;
+		}
+		balTimerScale = scale(balTimerScale);
+		lobbyDayScale = scale(lobbyDayScale);
+		scavengerScale = scale(scavengerScale);
+		terrorStacksScale = scale(terrorStacksScale);
+		if (!terrorStacksScaleBumped) {
+			terrorStacksScale = d.terrorStacksScale;
+			terrorStacksScaleBumped = true;
+		}
+		rngdleHudScale = scale(rngdleHudScale);
+		alertScale = scale(alertScale);
+		rngdleVolume = range(rngdleVolume, 0, 200, d.rngdleVolume);
+		objectiveSoundVolume = range(objectiveSoundVolume, 0, 200, d.objectiveSoundVolume);
+		achievementVolume = range(achievementVolume, 0, 200, d.achievementVolume);
+		jackpotVolume = range(jackpotVolume, 0, 200, d.jackpotVolume);
+		jackpotSpeedEarlyPct = range(jackpotSpeedEarlyPct, 50, 200, d.jackpotSpeedEarlyPct);
+		jackpotSpeedWheelPct = range(jackpotSpeedWheelPct, 50, 200, d.jackpotSpeedWheelPct);
+		jackpotSpeedCelebPct = range(jackpotSpeedCelebPct, 50, 200, d.jackpotSpeedCelebPct);
+		jackpotOddsJaderald = range(jackpotOddsJaderald, 1, 1_000_000, d.jackpotOddsJaderald);
+		jackpotOddsFragment = range(jackpotOddsFragment, 1, 1_000_000, d.jackpotOddsFragment);
+		jackpotOddsMixture = range(jackpotOddsMixture, 1, 1_000_000, d.jackpotOddsMixture);
+		jackpotOddsFlawless = range(jackpotOddsFlawless, 1, 1_000_000, d.jackpotOddsFlawless);
+		jackpotZoomPct = range(jackpotZoomPct, 0, 100, d.jackpotZoomPct);
+		timerBg = range(timerBg, 0, 100, d.timerBg);
+		autoSafeModeRuns = range(autoSafeModeRuns, 1, 20, d.autoSafeModeRuns);
+		if (objectiveSoundId == null || objectiveSoundId.isBlank()) {
+			objectiveSoundId = d.objectiveSoundId;
+		}
+		if (customSoundPath == null) {
+			customSoundPath = d.customSoundPath;
+		}
+		jackpotPreview = jackpotPreview == null || jackpotPreview.isBlank()
+			? d.jackpotPreview : jackpotPreview.trim().toLowerCase();
+	}
+
+	private static float scale(float v) {
+		return v >= 0.5f && v <= 3.0f ? v : 1.0f;
+	}
+
+	private static int range(int v, int min, int max, int fallback) {
+		return v >= min && v <= max ? v : fallback;
+	}
+
+	private void copyFrom(NucleusConfig src) {
+		for (Field f : NucleusConfig.class.getDeclaredFields()) {
+			if (Modifier.isStatic(f.getModifiers())) {
+				continue;
+			}
+			try {
+				f.set(this, f.get(src));
+			} catch (IllegalAccessException e) {
+				NucleusMod.LOGGER.warn("Config field {} not copied", f.getName());
+			}
 		}
 	}
 }

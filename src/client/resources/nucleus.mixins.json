@@ -6,8 +6,7 @@
 	"client": [
 		"GuiMixin",
 		"ClientPacketMixin",
-		"GameRendererMixin",
-		"BossOverlayAccessor"
+		"GameRendererMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

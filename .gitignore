@@ -42,3 +42,8 @@ hs_err_*.log
 replay_*.log
 *.hprof
 *.jfr
+
+# local build/install output and scratch backups
+build_log.txt
+install_log.txt
+.claude_backup/

@@ -2,7 +2,6 @@ package com.nucleus.client;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
@@ -53,7 +52,7 @@ public class ConfirmResetScreen extends Screen {
 	protected void init() {
 		int cx = this.width / 2;
 		int y = this.height / 2 - 10;
-		addRenderableWidget(Button.builder(Component.literal(mode.yes), btn -> {
+		addRenderableWidget(NucleusUi.NButton.create(Component.literal(mode.yes), btn -> {
 			if (mode == Mode.ACHIEVEMENTS) {
 				NucleusMod.SPEEDRUN.resetAchievements();
 			} else {
@@ -66,9 +65,16 @@ public class ConfirmResetScreen extends Screen {
 				? "§b[MNU] §7All achievements reset."
 				: "§b[MNU] §7All settings reset to defaults."));
 		}).pos(cx - 155, y).size(150, 20).build());
-		addRenderableWidget(Button.builder(Component.literal("No, keep mine"), btn -> {
+		addRenderableWidget(NucleusUi.NButton.create(Component.literal("No, keep mine"), btn -> {
 			Minecraft.getInstance().gui.setScreen(parent instanceof MadoBrickScreen ? new MadoBrickScreen() : parent);
 		}).pos(cx + 5, y).size(150, 20).build());
+	}
+
+	@Override
+	public void extractBackground(GuiGraphicsExtractor gfx, int mouseX, int mouseY, float partialTick) {
+		NucleusUi.backdrop(gfx, this.width, this.height, this.minecraft != null && this.minecraft.level != null);
+		NucleusUi.panel(gfx, Math.max(6, this.width / 2 - 180), 6, Math.min(this.width - 6, this.width / 2 + 180),
+			this.height - 6, 0xFF5A5A);
 	}
 
 	@Override

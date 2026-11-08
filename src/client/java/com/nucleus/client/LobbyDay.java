@@ -18,6 +18,8 @@ public final class LobbyDay {
 	private static String lobbyLine = "";
 	private static ClientLevel lastLevel = null;
 	private static long joinAtMs = 0L;
+	/** Lobby day from the world clock (-1 = unknown). */
+	private static long currentDay = -1L;
 
 	public static void reset() {
 		ticksSincePoll = 0;
@@ -25,6 +27,12 @@ public final class LobbyDay {
 		lobbyLine = "";
 		lastLevel = null;
 		joinAtMs = 0L;
+		currentDay = -1L;
+	}
+
+	/** Day N of this lobby's clock, or -1 when not known yet. */
+	public static long currentDay() {
+		return currentDay;
 	}
 
 	public static void tick(Minecraft client) {
@@ -36,6 +44,7 @@ public final class LobbyDay {
 		if (client == null || client.level == null) {
 			dayLine = "";
 			lobbyLine = "";
+			currentDay = -1L;
 			return;
 		}
 		long now = System.currentTimeMillis();
@@ -55,6 +64,7 @@ public final class LobbyDay {
 			worldTime = 0L;
 		}
 		long day = worldTime / 24000L;
+		currentDay = day;
 		int pct = (int) ((worldTime % 24000L) * 100L / 24000L);
 		dayLine = "☀ Day " + day + " (" + pct + "%)";
 		lobbyLine = "Lobby " + fmtHms(Math.max(0L, now - joinAtMs));

@@ -106,6 +106,18 @@ public class SpeedrunStore {
 	public Set<String> unlockedFun = new HashSet<>();
 	/** Repeatable achievement id -> total times earned (first repeat is x2). */
 	public Map<String, Integer> funRepeats = new HashMap<>();
+	/** Hollows lobbies visited: server name -> "lobbyDay|epochMs" (bad lobby alert). */
+	public Map<String, String> lobbyVisits = new HashMap<>();
+	/** Times the config screen's logo was clicked (logo achievement line). */
+	public long logoClicks = 0;
+	/** Menu logo explosions (Phoenix). */
+	public long logoExplosions = 0;
+	/** Menu theme changes (Interior Decorator). */
+	public long themeSwitches = 0;
+	/** Seasons (by date) the menu was opened in, e.g. "CHRISTMAS" (Seasonal Visitor). */
+	public Set<String> seasonsSeen = new HashSet<>();
+	/** Back-to-back bundle streaks: streak key -> consecutive bundles containing it. */
+	public Map<String, Integer> bundleStreaks = new HashMap<>();
 	/** Achievement ids with revealed hint descriptions. */
 	public Set<String> revealedHints = new HashSet<>();
 	/** Epoch day (UTC) the last hint was taken; one hint per day. */
@@ -126,6 +138,10 @@ public class SpeedrunStore {
 		public List<Long> splits = new ArrayList<>();
 		public List<Long> segments = new ArrayList<>();
 		public List<String> loot = new ArrayList<>();
+		/** Coins the bundle was worth when it landed (-1 = not priced yet: recompute live). */
+		public long lootValue = -1;
+		/** Coins the run cost (Jungle Key + robot parts / apparatus) at finish (-1 = unknown). */
+		public long runCost = -1;
 	}
 	/** Finished-run history, oldest first, capped at 100. */
 	public List<RunRecord> runHistory = new ArrayList<>();
@@ -244,6 +260,18 @@ public class SpeedrunStore {
 			}
 			if (loaded.funRepeats != null) {
 				funRepeats = new HashMap<>(loaded.funRepeats);
+			}
+			logoClicks = loaded.logoClicks;
+			logoExplosions = loaded.logoExplosions;
+			themeSwitches = loaded.themeSwitches;
+			if (loaded.seasonsSeen != null) {
+				seasonsSeen = new HashSet<>(loaded.seasonsSeen);
+			}
+			if (loaded.lobbyVisits != null) {
+				lobbyVisits = new HashMap<>(loaded.lobbyVisits);
+			}
+			if (loaded.bundleStreaks != null) {
+				bundleStreaks = new HashMap<>(loaded.bundleStreaks);
 			}
 			if (loaded.revealedHints != null) {
 				revealedHints = new HashSet<>(loaded.revealedHints);

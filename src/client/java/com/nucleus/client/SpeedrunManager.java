@@ -102,11 +102,29 @@ public final class SpeedrunManager {
 			} else if (state == State.FINISHED && lastFinished != null
 				&& System.currentTimeMillis() - lastFinishedAt < GAP_LOOT_MS) {
 				lastFinished.loot.clear();
+				lastFinished.lootValue = 0L;
 				NucleusMod.SPEEDRUN.save();
 			}
 		} catch (Exception ignored) {
 		}
 	}
+	/** Bundle block closed: if it belongs to the run that just finished, say what it made. */
+	public static void noteBundleClosed() {
+		try {
+			if (state == State.FINISHED && lastFinished != null && !lastFinished.loot.isEmpty()
+				&& System.currentTimeMillis() - lastFinishedAt < GAP_LOOT_MS) {
+				Long p = RunHistoryScreen.profit(lastFinished);
+				if (p != null) {
+					long[] st = RunHistoryScreen.profitStats(NucleusMod.SPEEDRUN.runHistory);
+					MadoChat.chat(Minecraft.getInstance(), Component.literal("§b[MNU] §7Run profit: "
+						+ (p < 0 ? "§c" : "§a") + RunHistoryScreen.coins(p, true)
+						+ " §8| §7avg/run " + (st[0] < 0 ? "§c" : "§a") + RunHistoryScreen.coins(st[0], true)));
+				}
+			}
+		} catch (Exception ignored) {
+		}
+	}
+
 	/**
 	 * Bundle loot line for the run history. Live lines go to the running
 	 * run's buffer; lines arriving in the minute after a finish (the run's
@@ -125,6 +143,7 @@ public final class SpeedrunManager {
 				&& System.currentTimeMillis() - lastFinishedAt < GAP_LOOT_MS
 				&& lastFinished.loot.size() < MAX_LOOT_LINES) {
 				lastFinished.loot.add(entry);
+				lastFinished.lootValue = DropPrices.bundleValue(lastFinished.loot);
 				NucleusMod.SPEEDRUN.save();
 			}
 		} catch (Exception ignored) {
@@ -178,7 +197,6 @@ public final class SpeedrunManager {
 
 	public static void onLeave() {
 		printLobbySummaryIfNeeded();
-		Achievements.abortRun();
 		runLoot.clear();
 		lastFinished = null;
 		state = State.IDLE;
@@ -237,7 +255,6 @@ public final class SpeedrunManager {
 
 	public static void resetRun() {
 		Minecraft client = Minecraft.getInstance();
-		Achievements.abortRun();
 		runLoot.clear();
 		lastFinished = null;
 		state = State.IDLE;
@@ -278,6 +295,17 @@ public final class SpeedrunManager {
 		MadoChat.chat(client, bestLine);
 		MadoChat.chat(client, Component.literal(
 			"§7Average (trimmed): §e" + SpeedrunStore.fmt(NucleusMod.SPEEDRUN.trimmedAverageMs())));
+		long[] profit = RunHistoryScreen.profitStats(NucleusMod.SPEEDRUN.runHistory);
+		if (profit[3] > 0) {
+			MadoChat.chat(client, Component.literal("§7Avg profit/run: " + (profit[0] < 0 ? "§c" : "§a")
+				+ RunHistoryScreen.coins(profit[0], true) + " §8(" + profit[3] + " runs, total "
+				+ RunHistoryScreen.coins(profit[2], true) + ")"));
+			Long perHour = RunHistoryScreen.coinsPerHour(profit[0], NucleusMod.SPEEDRUN.trimmedAverageMs());
+			if (perHour != null) {
+				MadoChat.chat(client, Component.literal("§7Coins/hour: " + (perHour < 0 ? "§c" : "§a")
+					+ RunHistoryScreen.coins(perHour, true) + " §8(1h / avg time x avg profit)"));
+			}
+		}
 		for (String id : NucleusMod.SPEEDRUN.order) {
 			Long segBest = NucleusMod.SPEEDRUN.bestSegments.get(id);
 			long segAvg = NucleusMod.SPEEDRUN.segmentAverageMs(id);
@@ -433,7 +461,6 @@ public final class SpeedrunManager {
 		placeCount = 0;
 		placedCrystals.clear();
 		AFK.reset();
-		Achievements.onRunStarted();
 		runLoot.clear();
 		lastFinished = null;
 		runStartMs = System.currentTimeMillis();
@@ -498,6 +525,8 @@ public final class SpeedrunManager {
 		record.splits = new ArrayList<>(splitTimes);
 		record.segments = new ArrayList<>(segmentTimes);
 		record.loot = new ArrayList<>(runLoot);
+		record.lootValue = DropPrices.bundleValue(record.loot);
+		record.runCost = DropPrices.runCost();
 		runLoot.clear();
 		boolean newBest = NucleusMod.SPEEDRUN.submitRun(total, new ArrayList<>(runOrder), new ArrayList<>(splitTimes), new ArrayList<>(segmentTimes), record);
 		lastFinished = record;

@@ -44,7 +44,12 @@ public final class AlertHud implements HudElement {
 		String line1 = null;
 		String line2 = null;
 		int color1 = 0xFFFF5555;
-		if (PetAlert.alertActive()) {
+		if (BadLobbyAlert.active()) {
+			boolean flash = (System.currentTimeMillis() / 400L) % 2L == 0L;
+			line1 = "BAD LOBBY!";
+			line2 = BadLobbyAlert.reason();
+			color1 = flash ? 0xFFFFFFFF : 0xFFFF5555;
+		} else if (PetAlert.alertActive()) {
 			String pet = PetAlert.currentPet();
 			line1 = "WRONG PET!";
 			line2 = "Equip Mole" + (pet == null ? "" : " (now: " + pet + ")");

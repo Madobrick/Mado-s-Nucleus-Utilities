@@ -24,12 +24,14 @@ import com.nucleus.NucleusMod;
  * <li>WHEEL — a segmented wheel (Claw / Alloy / Jaderald / Fragment /
  * Mixture / Flawless / Jade) spins fast, then eases out over ~12s and
  * lands inside the outcome segment. Peg clicks slow down with the wheel
- * for tension.</li>
- * <li>MAXWIN — the existing MAX WIN celebration, opened with a white flash.</li>
+ * for tension. Edge runs crawl longer onto a rare boundary under a stress
+ * bed and a closing black vignette, then hold still for a beat.</li>
+ * <li>MAXWIN — white flash, the 3D item pop, and a coin counter rolling up
+ * to the drop's live price (see {@link WinRollup}).</li>
  * </ol>
  * Speed scales every phase. Durations: intro 1.6s, power/luck 2.7s each,
- * wheel 7s (weak) to 15s (hypersonic), maxwin 4s (fragment) / 5s (small)
- * / 7s (claw) / 9s (alloy) / 10s (jade).
+ * wheel 7s (weak) to 15s (hypersonic) plus a 0.9s edge hold, maxwin ~5s
+ * (sub-500k) up to ~12s (billion-coin drops).
  */
 public final class JackpotAnimation {
 	/** Win tiers, weakest first. Drives duration, sounds, coins and flash. */
@@ -42,9 +44,10 @@ public final class JackpotAnimation {
 		JADE_DYE("Jade Dye", "U L T R A   L E G E N D A R Y   M A X   W I N", 10000L, Tier.MEGA, 0xFF55FF55),
 		QUICK_CLAW("Quick Claw", "M A J O R   W I N", 7000L, Tier.MAJOR, 0xFFAAAAAA),
 		JADERALD("Jaderald", "S M A L L   W I N", 5000L, Tier.SMALL, 0xFF7DD48A),
-		DIVAN_FRAGMENT("Divan Fragment", "M A X   L O S E", 4000L, Tier.LOSE, 0xFFC2A94E),
+		DIVAN_FRAGMENT("Divan Fragment", "S M A L L   W I N", 4000L, Tier.LOSE, 0xFFC2A94E),
 		GEMSTONE_MIXTURE("Gemstone Mixture", "S M A L L   W I N", 5000L, Tier.SMALL, 0xFF7B3FAE),
-		FLAWLESS_GEMSTONE("Flawless Gemstone", "S M A L L   W I N", 5000L, Tier.SMALL, 0xFFFF6EC7);
+		FLAWLESS_GEMSTONE("Flawless Gemstone", "S M A L L   W I N", 5000L, Tier.SMALL, 0xFFFF6EC7),
+		PRECIOUS_PEARL("Precious Pearl", "S M A L L   W I N", 5000L, Tier.SMALL, 0xFFE3CCF2);
 
 		public final String displayName;
 		/** MAXWIN headline, spaced for the casino look. */
@@ -77,6 +80,7 @@ public final class JackpotAnimation {
 				case DIVAN_FRAGMENT -> fragmentStack();
 				case GEMSTONE_MIXTURE -> mixtureStack();
 				case FLAWLESS_GEMSTONE -> flawlessStack();
+				case PRECIOUS_PEARL -> pearlStack();
 			};
 		}
 	}
@@ -88,6 +92,23 @@ public final class JackpotAnimation {
 	private static ItemStack fragmentStack;
 	private static ItemStack mixtureStack;
 	private static ItemStack flawlessStack;
+	private static ItemStack pearlStack;
+
+	private static synchronized ItemStack pearlStack() {
+		if (pearlStack == null) {
+			// NEU PRECIOUS_PEARL: paper base wearing Hypixel's own pearl
+			// model (real look with the server pack on).
+			ItemStack s = new ItemStack(Items.PAPER);
+			s.set(DataComponents.CUSTOM_NAME, Component.literal("§5Precious Pearl"));
+			try {
+				s.set(DataComponents.ITEM_MODEL, net.minecraft.resources.Identifier.fromNamespaceAndPath(
+					"hypixel_skyblock", "item/power_stones/precious_pearl"));
+			} catch (Exception ignored) {
+			}
+			pearlStack = s;
+		}
+		return pearlStack;
+	}
 
 	/** Specific gem for the flawless totem (parsed from the loot line). */
 	private static String flawlessName = "Flawless Gemstone";
@@ -99,20 +120,6 @@ public final class JackpotAnimation {
 		}
 		if (gemId != null && gemId.matches("[a-z]+")) {
 			flawlessGem = gemId;
-		}
-	}
-
-	/** Back-compat: display name only, gem id derived when possible. */
-	public static void setFlawlessName(String name) {
-		if (name != null && !name.isBlank()) {
-			flawlessName = name;
-			String[] parts = name.trim().split("\\s+");
-			if (parts.length >= 2) {
-				String gem = parts[parts.length - 1].toLowerCase(java.util.Locale.ROOT);
-				if (gem.matches("[a-z]+")) {
-					flawlessGem = gem;
-				}
-			}
 		}
 	}
 
@@ -222,38 +229,35 @@ public final class JackpotAnimation {
 	}
 
 	/**
-	 * Wheel slices, clockwise degrees from the top pointer, measured off
-	 * the current wheel bake: 11 even 28° spots (Claw / Jaderald / Fragment
-	 * / Mixture / Flawless), two 20° Alloy spots, one tiny 12° Jade spot.
-	 * Never two matching adjacent. Each slice carries its own face color.
+	 * Wheel slices, clockwise degrees from the top pointer. Slice k runs
+	 * from peg k to peg k+1, with the pegs measured off the wheel bake
+	 * (see {@link FlapperPhysics#PEG_ANG}): the pegs are what the flapper
+	 * actually reads, so the slices are defined by them. Never two matching
+	 * adjacent. Each slice carries its own face color.
 	 */
 	public record Slice(DropType type, double start, double end, int color) {
 	}
 
-	private static final Slice[] SLICES = {
-		new Slice(DropType.GEMSTONE_MIXTURE, 0.0, 28.0, 0xFF7B3FAE),
-		new Slice(DropType.JADERALD, 28.0, 56.0, 0xFF7DD48A),
-		new Slice(DropType.DIVAN_FRAGMENT, 56.0, 84.0, 0xFFC2A94E),
-		new Slice(DropType.GEMSTONE_MIXTURE, 84.0, 112.0, 0xFF7B3FAE),
-		new Slice(DropType.FLAWLESS_GEMSTONE, 112.0, 140.0, 0xFFFF6EC7),
-		new Slice(DropType.DIVANS_ALLOY, 140.0, 160.0, 0xFFFF7F00),
-		new Slice(DropType.JADERALD, 160.0, 188.0, 0xFF7DD48A),
-		new Slice(DropType.DIVAN_FRAGMENT, 188.0, 216.0, 0xFFC2A94E),
-		new Slice(DropType.GEMSTONE_MIXTURE, 216.0, 244.0, 0xFF7B3FAE),
-		new Slice(DropType.FLAWLESS_GEMSTONE, 244.0, 272.0, 0xFFFF6EC7),
-		new Slice(DropType.JADERALD, 272.0, 300.0, 0xFF7DD48A),
-		new Slice(DropType.DIVAN_FRAGMENT, 300.0, 328.0, 0xFFC2A94E),
-		new Slice(DropType.QUICK_CLAW, 328.0, 348.0, 0xFFAAAAAA),
-		new Slice(DropType.JADE_DYE, 348.0, 360.0, 0xFF046A38)
+	private static final DropType[] SLICE_TYPES = {
+		// Slices 3 and 10 are the Precious Pearls (wheel.png was rebaked to match).
+		DropType.GEMSTONE_MIXTURE, DropType.JADERALD, DropType.DIVAN_FRAGMENT, DropType.PRECIOUS_PEARL,
+		DropType.FLAWLESS_GEMSTONE, DropType.DIVANS_ALLOY, DropType.JADERALD, DropType.DIVAN_FRAGMENT,
+		DropType.GEMSTONE_MIXTURE, DropType.FLAWLESS_GEMSTONE, DropType.PRECIOUS_PEARL, DropType.DIVAN_FRAGMENT,
+		DropType.QUICK_CLAW, DropType.JADE_DYE
 	};
 
-	/**
-	 * Orange rim dots, one per segment boundary, measured off the bake.
-	 * These are what strike the flapper — keep them on the art.
-	 */
-	private static final double[] PEG_ANGLES = {
-		0, 28, 56, 84, 112, 140, 160, 188, 216, 244, 272, 300, 328, 348
-	};
+	private static final Slice[] SLICES = buildSlices();
+
+	private static Slice[] buildSlices() {
+		double[] peg = FlapperPhysics.PEG_ANG;
+		Slice[] out = new Slice[SLICE_TYPES.length];
+		for (int k = 0; k < out.length; k++) {
+			double start = peg[k];
+			double end = k + 1 < peg.length ? peg[k + 1] : peg[0] + 360.0;
+			out[k] = new Slice(SLICE_TYPES[k], start, end, segmentColor(SLICE_TYPES[k]));
+		}
+		return out;
+	}
 
 	/** Live slice table for HUD widgets (chase lights ride slice centers). */
 	public static Slice[] slices() {
@@ -290,6 +294,13 @@ public final class JackpotAnimation {
 	private static final double BLUR_RPM_MAX = 100.0;
 	/** Luck roll where the rare slices start to sparkle. */
 	private static final int SPARKLE_LUCK_MIN = 60;
+	/** Edge runs: stress kicks in with this many degrees left to travel. */
+	private static final double STRESS_DEG = 90.0;
+	/** Intro lettering: first letter lands here, then one every step (intro ms, pre-speed). */
+	public static final long INTRO_LETTER_AT = 120L;
+	public static final long INTRO_LETTER_STEP = 55L;
+	/** Letters of "WHEEL FEATURE!" without the space, in slam order. */
+	public static final int INTRO_LETTERS = 13;
 	/** Rare drops worth edging: landing (or almost landing) on these is the sweat. */
 	private static boolean isEdgyRare(DropType d) {
 		return d == DropType.DIVANS_ALLOY || d == DropType.QUICK_CLAW || d == DropType.JADE_DYE;
@@ -315,6 +326,24 @@ public final class JackpotAnimation {
 		return mask;
 	}
 
+	/** Width of slice {@code i} as the wheel reads it (between its two boundaries). */
+	private static double readWidth(int i) {
+		int n = SLICES.length;
+		return ((bounds[(i + 1) % n] - bounds[i]) % 360.0 + 360.0) % 360.0;
+	}
+
+	/** Generated-audio loudness: the jackpot slider, plus Minecraft's master unless bypassed. */
+	static double synthVolume() {
+		double v = NucleusMod.CONFIG.jackpotVolume / 100.0;
+		if (!NucleusMod.CONFIG.bypassMinecraftVolume) {
+			try {
+				v *= Minecraft.getInstance().options.getSoundSourceVolume(net.minecraft.sounds.SoundSource.MASTER);
+			} catch (Exception ignored) {
+			}
+		}
+		return v;
+	}
+
 	private static boolean active = false;
 	private static DropType type = DropType.DIVANS_ALLOY;
 	private static long seqStart = 0L;
@@ -328,20 +357,46 @@ public final class JackpotAnimation {
 	/** Hidden 0-100 luck roll (rarity-weighted). Boosts the win shower. */
 	private static int luckRoll = 50;
 	private static double luckMult = 1.0;
-	private static int tagPick = 0;
 	private static boolean powerDinged = false;
 	private static boolean luckDinged = false;
 	private static long nextMiniAt = 0L;
 	private static double wheelStartAngle = 0;
 	private static double wheelTotal = 0;
+	/** The wheel stops here; edge runs then hold still until {@link #wheelEnd}. */
+	private static long wheelMotionEnd = 0L;
+	/** Slow-down ease exponent: 3 normally, 4 on edge runs for a longer crawl. */
+	private static double wheelEase = 3.0;
+	/** This spin edges a rare boundary: the teeter finale (stress bed + vignette). */
+	private static boolean edgeRun = false;
+	/** The edge run's script (null otherwise). */
+	private static EdgeFinale finale = null;
+	/** Wheel rotation where the crawl parks on the peg (edge runs). */
+	private static double wheelParkAngle = 0;
+	/**
+	 * Where the reading flips across each peg, as the rest-angle under the
+	 * pointer: the peg's angle minus its own slip point (see
+	 * FlapperPhysics). A pushed flap still points into the slice it came
+	 * from, so the result flips exactly when that peg lets go. Locked per
+	 * spin so a window resize can't change the outcome.
+	 */
+	private static double[] bounds = FlapperPhysics.PEG_ANG.clone();
+	/** Last render frame, for frame-accurate intro/roll-up sounds. */
+	private static long lastFrameAt = 0L;
 	/** 0..1 rim fire: tracks live wheel speed (fast up, fast down, no long linger). */
 	private static double wheelHeat = 0;
 	/** 0..1 motion-blur fade: snaps in with speed, drifts out slowly. */
 	private static double wheelBlurSmooth = 0;
 	/** True while the running sequence is a config-screen preview/test spin (no achievements). */
 	private static boolean previewRun = false;
+	/** Coins the reveal pays out (the whole bundle on real spins). */
+	private static long plannedCoins = 0L;
+	/** The sad trombone only plays for payouts under this. */
+	private static final long LOSE_BELOW_COINS = 1_000_000L;
+	/** Quick-spin leaves this much of the wheel's motion to play. */
+	private static final long QUICK_SPIN_LEFT_MS = 1000L;
+	/** Slice the current spin comes to rest in (for the Ouch achievement). */
+	private static int landedSlice = -1;
 	private static Stage lastStage = null;
-	private static DropType lastLeader = null;
 	// Classic spring flapper for the main spin; the deterministic curve
 	// takes over for the finale only (see flapperAngle).
 	private static double flapperAngle = 0;
@@ -351,11 +406,7 @@ public final class JackpotAnimation {
 	private static final List<Coin> COINS = new ArrayList<>();
 	private static double spawnAcc = 0;
 	private static long lastTickMillis = 0L;
-	private static long nextSoundAt = 0L;
-	private static long nextBlastAt = 0L;
-	private static long nextMegaAt = 0L;
 	private static long nextHeartAt = 0L;
-	private static int soundStep = 0;
 	private static volatile int screenW = 854;
 	private static volatile int screenH = 480;
 
@@ -388,15 +439,6 @@ public final class JackpotAnimation {
 		return clampSpeed(NucleusMod.CONFIG.jackpotSpeedCelebPct);
 	}
 
-	/** Current speed multiplier for HUD-side timing (zoom windows ride the wheel). */
-	public static synchronized float speedMult() {
-		return speedWheel();
-	}
-
-	private static long maxwinMs(DropType t) {
-		return t.durationMs;
-	}
-
 	public static synchronized void start(DropType t) {
 		start(t, false);
 	}
@@ -411,7 +453,6 @@ public final class JackpotAnimation {
 		}
 		float sEarly = speedEarly();
 		float sWheel = speedWheel();
-		float sCeleb = speedCeleb();
 		long now = System.currentTimeMillis();
 		// Same drop re-detected (bundle line + announcement for one item):
 		// never restart a fresh spin, or the wheel visibly jumps.
@@ -441,109 +482,327 @@ public final class JackpotAnimation {
 		powerDinged = false;
 		luckDinged = false;
 		nextMiniAt = now;
-		tagPick = ThreadLocalRandom.current().nextInt(64);
 
 		introEnd = now + (long) (INTRO_MS / sEarly);
 		powerEnd = introEnd + (long) (POWER_MS / sEarly);
 		luckEnd = powerEnd + (long) (LUCK_MS / sEarly);
-		wheelEnd = luckEnd + (long) ((WHEEL_BASE_MS + powerRoll * WHEEL_POWER_MS) / sWheel);
-		seqEnd = wheelEnd + (long) (maxwinMs(t) / sCeleb);
+		wheelMotionEnd = luckEnd + (long) ((WHEEL_BASE_MS + powerRoll * WHEEL_POWER_MS) / sWheel);
+
+		// The reading is defined by the real flapper: lock this layout's
+		// per-peg slip points so the result flips exactly when a peg lets go.
+		try {
+			Minecraft mc = Minecraft.getInstance();
+			FlapperPhysics.layout(mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight());
+		} catch (Exception ignored) {
+		}
+		bounds = FlapperPhysics.effectiveBoundaries();
+		FlapperPhysics.reset();
+		Synth.jackpotVolume = JackpotAnimation::synthVolume;
+		SynthMixer.prepare();
 
 		// Predetermined landing spot inside one of the outcome's slices.
 		// Edging: ~65% of the time, when the result is a rare (Alloy / Claw
-		// / Jade) or sits next to one, stop 1-2° inside the knob — both the
-		// "almost rolled past my alloy" and the "a millimeter more!"
-		// near-miss. Otherwise land uniformly with the usual safe margin.
-		DropType tFinal = t;
+		// / Jade) or sits next to one, the wheel parks a peg under the
+		// flapper with the flap levered right onto its tip, on the line
+		// between the rare and its neighbour, and teeters there. Then it
+		// either FLIPS over (the peg slides off, the flap snaps into the
+		// slice ending at that peg) or STAYS (the spring shoves the wheel
+		// back into the slice starting at it). Both are about equally
+		// likely; the outcome decides which one can tell the true story.
+		edgeRun = false;
+		finale = null;
+		java.util.Random rnd = new java.util.Random();
 		java.util.List<Integer> options = new java.util.ArrayList<>();
 		double totalLen = 0;
 		for (int si = 0; si < SLICES.length; si++) {
-			if (SLICES[si].type() == tFinal) {
+			if (SLICES[si].type() == t) {
 				options.add(si);
-				totalLen += SLICES[si].end() - SLICES[si].start();
+				totalLen += readWidth(si);
 			}
 		}
-		java.util.List<Integer> edgeable = new java.util.ArrayList<>();
-		double edgeableLen = 0;
+		int n = SLICES.length;
+		java.util.List<Integer> stayOpts = new java.util.ArrayList<>();
+		java.util.List<Integer> flipOpts = new java.util.ArrayList<>();
 		for (int si : options) {
-			if (edgySides(si) != 0) {
-				edgeable.add(si);
-				edgeableLen += SLICES[si].end() - SLICES[si].start();
+			int mask = edgySides(si);
+			if ((mask & 1) != 0) {
+				stayOpts.add(si);
+			}
+			if ((mask & 2) != 0) {
+				flipOpts.add(si);
 			}
 		}
-		Slice chosen;
-		double target;
-		if (!edgeable.isEmpty() && Math.random() < 0.65) {
-			double edgePick = Math.random() * edgeableLen;
-			int chosenIdx = edgeable.get(0);
-			for (int si : edgeable) {
-				edgePick -= SLICES[si].end() - SLICES[si].start();
-				if (edgePick <= 0) {
-					chosenIdx = si;
-					break;
-				}
-			}
-			chosen = SLICES[chosenIdx];
-			int mask = edgySides(chosenIdx);
-			int side;
-			if ((mask & 1) != 0 && (mask & 2) != 0) {
-				side = Math.random() < 0.5 ? -1 : 1;
-			} else if ((mask & 1) != 0) {
-				side = -1;
+		double targetRead;
+		boolean wantEdge = (!stayOpts.isEmpty() || !flipOpts.isEmpty()) && rnd.nextDouble() < 0.65;
+		if (wantEdge) {
+			boolean flip;
+			if (!stayOpts.isEmpty() && !flipOpts.isEmpty()) {
+				flip = rnd.nextBoolean();
 			} else {
-				side = 1;
+				flip = !flipOpts.isEmpty();
 			}
-			double off = 1.0 + Math.random() * 1.0;
-			target = side < 0 ? chosen.start() + off : chosen.end() - off;
+			java.util.List<Integer> pool = flip ? flipOpts : stayOpts;
+			int si = pool.get(rnd.nextInt(pool.size()));
+			// The boundary peg the flap balances on, and the slice it
+			// balances in: a flip parks in the next slice and falls back into
+			// ours; a stay parks in ours and rolls back deeper into it.
+			int peg = flip ? (si + 1) % n : si;
+			landedSlice = si;
+			targetRead = bounds[peg] + EdgeFinale.PARK_MARGIN;
+			double rollback = FlapperPhysics.reaches()
+				? FlapperPhysics.slipDeg(peg) - FlapperPhysics.contactDeg(peg) + 0.25
+				: 6.0;
+			rollback = Math.min(rollback, readWidth(si) * 0.7);
+			edgeRun = true;
+			finale = EdgeFinale.plan(flip, isEdgyRare(t), wheelMotionEnd, rollback, sWheel, rnd);
 		} else {
-			double pick = Math.random() * totalLen;
-			Slice picked = SLICES[options.get(0)];
+			double pick = rnd.nextDouble() * totalLen;
+			int chosen = options.get(0);
 			for (int si : options) {
-				pick -= SLICES[si].end() - SLICES[si].start();
+				pick -= readWidth(si);
 				if (pick <= 0) {
-					picked = SLICES[si];
+					chosen = si;
 					break;
 				}
 			}
-			chosen = picked;
-			double margin = Math.min(5.0, (chosen.end() - chosen.start()) * 0.25);
-			target = chosen.start() + margin + Math.random() * Math.max(0.5, (chosen.end() - chosen.start()) - margin * 2);
+			// Land where the flap hangs free: past the window where the
+			// slice's own start peg would still be pressing it, and clear of
+			// the far boundary. (Only edge runs park on a peg.)
+			double wdt = readWidth(chosen);
+			double press = FlapperPhysics.reaches()
+				? FlapperPhysics.slipDeg(chosen) - FlapperPhysics.contactDeg(chosen) + 0.8
+				: Math.min(5.0, wdt * 0.25);
+			double lo = press;
+			double hi = wdt - 1.2;
+			if (hi <= lo) {
+				lo = hi = (press + wdt) * 0.5;
+			}
+			targetRead = bounds[chosen] + lo + rnd.nextDouble() * (hi - lo);
+			landedSlice = chosen;
 		}
-		wheelStartAngle = Math.random() * 360.0;
+		wheelStartAngle = rnd.nextDouble() * 360.0;
 		// More power, more revolutions: 2 lazy turns up to 10 rips.
 		int spins = 2 + (int) Math.round(powerRoll * 8.0 / 100.0);
-		// Pointer reads rest-angle a with (a + theta) = 0 (mod 360), so to
-		// land on target we need theta = -target (mod 360).
-		double delta = ((-target - wheelStartAngle) % 360.0 + 360.0) % 360.0;
+		// The pointer reads rest-angle -theta, so landing on targetRead
+		// means theta = -targetRead (mod 360).
+		double delta = ((-targetRead - wheelStartAngle) % 360.0 + 720.0) % 360.0;
 		wheelTotal = spins * 360.0 + delta;
+		wheelParkAngle = wheelStartAngle + wheelTotal;
+		wheelEase = edgeRun ? 4.0 : 3.0;
+		wheelEnd = edgeRun ? (long) Math.ceil(finale.wheelEnd) : wheelMotionEnd;
+
+		EdgeStress.stop();
+		WinMusic.stop();
+		clicksScheduled = false;
+		if (edgeRun) {
+			// Stress starts with STRESS_DEG left to travel (inverse of the
+			// ease), kept between ~2s and ~6.5s so it always reads as a sweat.
+			long dur = Math.max(1L, wheelMotionEnd - luckEnd);
+			double uS = Math.pow(Math.min(1.0, STRESS_DEG / Math.max(1.0, wheelTotal)), 1.0 / wheelEase);
+			long len = Math.max(2200L, Math.min(6500L, (long) (uS * dur)));
+			len = Math.min(len, (long) (dur * 0.6));
+			EdgeStress.schedule(wheelMotionEnd - len, finale);
+		}
+
+		// Prices refresh in the background during the ~14s before the
+		// reveal; the plan is redone with the freshest price at wheel start.
+		DropPrices.refreshIfStale();
+		planRollup();
 
 		lastStage = null;
-		lastLeader = null;
 		lastPegIdx = -1;
 		lastKickSoundAt = 0L;
+		lastFrameAt = 0L;
 		wheelHeat = 0;
 		wheelBlurSmooth = 0;
 		COINS.clear();
 		spawnAcc = 0;
 		lastTickMillis = now;
-		nextSoundAt = now;
-		nextBlastAt = now;
-		nextMegaAt = now;
 		nextHeartAt = now;
-		soundStep = 0;
-		NucleusMod.LOGGER.info("Jackpot sequence started for {}", t.displayName);
+		NucleusMod.LOGGER.info("Jackpot sequence started for {}{}", t.displayName, edgeRun ? " (edge)" : "");
+	}
+
+	/** True when this spin's flapper clicks were queued on the audio clock. */
+	private static volatile boolean clicksScheduled = false;
+	private static Synth.ScoreTrack clickTrack;
+
+	/**
+	 * The wheel's motion is a known curve, so every moment a peg slides
+	 * off the flapper tip (its slip angle, per peg) is known in advance.
+	 * Queue each click on the mixer clock at that exact moment: it lands
+	 * on the frame the flap snaps, with the output latency already paid,
+	 * instead of being fired a frame late and then delayed again by the
+	 * sound engine. Falls back to the frame-detected click if the line
+	 * isn't up or the sound can't be decoded.
+	 */
+	private static synchronized void scheduleClicks() {
+		clicksScheduled = false;
+		if (clickTrack != null) {
+			clickTrack.stop();
+			SynthMixer.remove(clickTrack);
+			clickTrack = null;
+		}
+		if (!FlapperPhysics.reaches() || !SynthMixer.ready()) {
+			return;
+		}
+		NucleusSoundPack.Pack pack = NucleusSoundPack.current();
+		float[][] pcm = SystemAudio.floatPcm(pack.click());
+		if (pcm == null || pcm.length < 2) {
+			return;
+		}
+		float[] data = pcm[0];
+		int rate = (int) pcm[1][0];
+		double d = Math.max(1L, wheelMotionEnd - luckEnd);
+		java.util.List<Double> times = new java.util.ArrayList<>();
+		for (int i = 0; i < FlapperPhysics.PEGS; i++) {
+			double base = FlapperPhysics.slipDeg(i) - FlapperPhysics.PEG_ANG[i];
+			double kMin = Math.ceil((wheelStartAngle - base) / 360.0);
+			double kMax = Math.floor((wheelStartAngle + wheelTotal - base) / 360.0);
+			for (double k = kMin; k <= kMax; k++) {
+				double target = base + 360.0 * k;
+				double frac = (target - wheelStartAngle) / wheelTotal;
+				if (frac <= 0.0 || frac >= 1.0) {
+					continue;
+				}
+				double u = 1.0 - Math.pow(1.0 - frac, 1.0 / wheelEase);
+				times.add(luckEnd + u * d);
+			}
+		}
+		if (edgeRun && finale != null && finale.flip) {
+			times.add(finale.decisionAt);
+		}
+		java.util.Collections.sort(times);
+		Synth.ScoreTrack st = new Synth.ScoreTrack(0.2);
+		double last = -1e9;
+		double span = Math.max(1.0, wheelEnd - luckEnd);
+		long nowMs = System.currentTimeMillis();
+		for (double t : times) {
+			if (t - last < 38.0 || t < nowMs) {
+				continue;
+			}
+			last = t;
+			float pitch = (float) (1.0 + 0.5 * Math.min(1.0, (t - luckEnd) / span)) * pack.clickPitch();
+			st.add(new Synth.SampleVoice(data, rate, pitch).at(t).gain(0.4 * pack.clickGain()).send(0.0));
+		}
+		st.sort();
+		st.volume = Synth.jackpotVolume;
+		clickTrack = st;
+		SynthMixer.addScheduled(st);
+		clicksScheduled = true;
+	}
+
+	/** This spin pays out under {@link #LOSE_BELOW_COINS}: a MAX LOSE (sad trombone, grey banner). */
+	public static synchronized boolean isLoss() {
+		return plannedCoins < LOSE_BELOW_COINS;
+	}
+
+	/** Quick-spin key: jumps the wheel to its last second (only while the wheel is showing). */
+	public static void quickSpin() {
+		synchronized (JackpotAnimation.class) {
+			if (!active) {
+				return;
+			}
+			Stage st = stage();
+			if (st == Stage.MAXWIN) {
+				return;
+			}
+			if (st != Stage.WHEEL) {
+				// Only once the wheel is up: the intro and the power/luck
+				// gambles always play.
+				return;
+			}
+		}
+		applyQuickSpin();
+	}
+
+	/**
+	 * Moves the whole timeline earlier so only the last
+	 * {@link #QUICK_SPIN_LEFT_MS} of the wheel's motion is left (an edge
+	 * run's teeter still plays in full after it), then re-queues the
+	 * clicks, the stress bed and the win music on the new times.
+	 */
+	private static synchronized void applyQuickSpin() {
+		long now = System.currentTimeMillis();
+		if (!active || stage() != Stage.WHEEL) {
+			return;
+		}
+		long delta = (wheelMotionEnd - QUICK_SPIN_LEFT_MS) - now;
+		if (delta < 250L) {
+			return;
+		}
+		seqStart -= delta;
+		introEnd -= delta;
+		powerEnd -= delta;
+		luckEnd -= delta;
+		wheelMotionEnd -= delta;
+		wheelEnd -= delta;
+		seqEnd -= delta;
+		if (finale != null) {
+			finale = finale.shifted(-delta);
+		}
+		// Flap posed as if the wheel had crawled here (a reset would start it
+		// inside a pressing peg and shove it out on the wrong side).
+		FlapperPhysics.settleAt(wheelAngle(), now);
+		EdgeStress.stop();
+		WinMusic.stop();
+		if (edgeRun && finale != null) {
+			EdgeStress.schedule(now, finale);
+		}
+		scheduleMusic();
+		scheduleClicks();
+		NucleusMod.LOGGER.info("Quick-spin: skipped {} ms of the wheel", delta);
+	}
+
+	/** Queues the MAXWIN score on the roll-up plan (reveal = wheelEnd). */
+	private static synchronized void scheduleMusic() {
+		try {
+			WinMusic.schedule(wheelEnd, speedCeleb(), WinRollup.segStarts(), WinRollup.segEnds(),
+				WinRollup.crawlFracs(), WinRollup.totalMs(), plannedCoins < LOSE_BELOW_COINS, !edgeRun,
+				type == DropType.JADE_DYE);
+		} catch (Exception e) {
+			NucleusMod.LOGGER.warn("Win music failed to plan: {}", e.toString());
+		}
+	}
+
+	/** A bundle this old (or older) at wheel start isn't the one that fired the spin. */
+	private static final long BUNDLE_MAX_AGE_MS = 60_000L;
+
+	/**
+	 * Locks the payout into the roll-up and sizes MAXWIN to fit it. Real
+	 * spins count the whole loot bundle the drop came in (every line priced
+	 * and summed), so the number differs every run; the wheel stage re-runs
+	 * this once all of the bundle's chat lines are in. Previews (and a
+	 * bundle that can't be priced) fall back to the drop's own price.
+	 */
+	private static synchronized void planRollup() {
+		long coins = DropPrices.price(type, flawlessGem);
+		if (!previewRun) {
+			long bundle = DropPrices.bundleValue(JackpotDetector.recentBundleLines(BUNDLE_MAX_AGE_MS));
+			// The drop is one of the bundle's lines, so the total is at least
+			// its price unless a line failed to parse: never show less.
+			coins = Math.max(coins, bundle);
+		}
+		plannedCoins = coins;
+		double ms = WinRollup.plan(coins, type == DropType.JADE_DYE ? 3200.0 : 0.0);
+		seqEnd = wheelEnd + (long) (ms / speedCeleb());
 	}
 
 	/** Test button: a real gamble — slice-weighted spin, wheel reveals it. */
 	public static synchronized DropType startTest() {
-		double r = Math.random() * 360.0;
-		DropType t = r < 20.0 ? DropType.QUICK_CLAW
-			: r < 40.0 ? DropType.DIVANS_ALLOY
-			: r < 124.0 ? DropType.JADERALD
-			: r < 208.0 ? DropType.DIVAN_FRAGMENT
-			: r < 292.0 ? DropType.GEMSTONE_MIXTURE
-			: r < 304.0 ? DropType.JADE_DYE
-			: DropType.FLAWLESS_GEMSTONE;
+		// Weighted by the slices' real widths, so it always matches the wheel.
+		double total = 0;
+		for (Slice s : SLICES) {
+			total += s.end() - s.start();
+		}
+		double r = Math.random() * total;
+		DropType t = SLICES[SLICES.length - 1].type();
+		for (Slice s : SLICES) {
+			r -= s.end() - s.start();
+			if (r <= 0) {
+				t = s.type();
+				break;
+			}
+		}
 		if (t == DropType.FLAWLESS_GEMSTONE) {
 			String gem = randomFlawlessGem();
 			setFlawless("Flawless " + Character.toUpperCase(gem.charAt(0)) + gem.substring(1), gem);
@@ -554,7 +813,7 @@ public final class JackpotAnimation {
 
 	/** Preview-drop picker ids for the config screen (first = random). */
 	public static final String[] PREVIEW_OPTIONS = {
-		"random", "alloy", "claw", "jade", "jaderald", "fragment", "mixture", "flawless"
+		"random", "alloy", "claw", "jade", "jaderald", "fragment", "mixture", "flawless", "pearl"
 	};
 
 	public static String previewLabel(String id) {
@@ -569,6 +828,7 @@ public final class JackpotAnimation {
 			case "fragment" -> "Divan Fragment";
 			case "mixture" -> "Gemstone Mixture";
 			case "flawless" -> "Flawless Gemstone";
+			case "pearl" -> "Precious Pearl";
 			default -> "Random";
 		};
 	}
@@ -603,6 +863,7 @@ public final class JackpotAnimation {
 			case "jaderald" -> DropType.JADERALD;
 			case "fragment" -> DropType.DIVAN_FRAGMENT;
 			case "mixture" -> DropType.GEMSTONE_MIXTURE;
+			case "pearl" -> DropType.PRECIOUS_PEARL;
 			default -> null;
 		};
 		if (t == null) {
@@ -641,18 +902,25 @@ public final class JackpotAnimation {
 		introEnd = 0L;
 		wheelEnd = 0L;
 		seqEnd = 0L;
+		wheelMotionEnd = 0L;
+		edgeRun = false;
+		finale = null;
+		EdgeStress.stop();
+		WinMusic.stop();
+		clicksScheduled = false;
+		if (clickTrack != null) {
+			clickTrack.stop();
+			SynthMixer.remove(clickTrack);
+			clickTrack = null;
+		}
 		COINS.clear();
 		spawnAcc = 0;
 		lastTickMillis = 0L;
-		nextSoundAt = 0L;
-		nextBlastAt = 0L;
-		nextMegaAt = 0L;
 		nextHeartAt = 0L;
-		soundStep = 0;
 		lastStage = null;
-		lastLeader = null;
 		lastPegIdx = -1;
 		lastKickSoundAt = 0L;
+		lastFrameAt = 0L;
 		wheelHeat = 0;
 		wheelBlurSmooth = 0;
 		previewRun = false;
@@ -660,6 +928,14 @@ public final class JackpotAnimation {
 
 	public static synchronized DropType type() {
 		return type;
+	}
+
+	/** Name shown on the reveal (the actual gem for flawless drops). */
+	public static synchronized String dropName() {
+		if (type == DropType.FLAWLESS_GEMSTONE && flawlessName != null && !flawlessName.isBlank()) {
+			return flawlessName + " Gemstone";
+		}
+		return type.displayName;
 	}
 
 	/** Spin-power tier name for the hidden roll (Weak..HYPERSONIC). */
@@ -726,11 +1002,6 @@ public final class JackpotAnimation {
 		return 0xFFFFD700;
 	}
 
-	/** This show's wheel-phase length in ms (power-scaled, pre-speed). */
-	public static synchronized long wheelDurationMs() {
-		return Math.max(1L, wheelEnd - luckEnd);
-	}
-
 	/** Number to show: flickering roll until it locks. */
 	public static synchronized int powerShown(float progress, long now) {
 		if (progress > MINI_LOCK_AT) {
@@ -750,25 +1021,6 @@ public final class JackpotAnimation {
 	/** True once the mini-gamble number has locked in. */
 	public static synchronized boolean miniLocked(Stage s) {
 		return stageProgress(s) > MINI_LOCK_AT;
-	}
-
-	/** Win tagline, picked per show from the drop's pool. */
-	public static synchronized String tagText() {
-		String[] pool = switch (type) {
-			case DIVANS_ALLOY -> new String[] { "LETS GO!", "INSANE!", "MONEYYY!!" };
-			case JADE_DYE -> new String[] { "UNBELIEVABLE!", "IMPOSSIBLE!", "I CANT BELIEVE IT!" };
-			case QUICK_CLAW -> new String[] { "Great!", "W!", "Dope!" };
-			case JADERALD -> new String[] { "Could be worse", "Its alright", "Bazalright" };
-			case DIVAN_FRAGMENT -> new String[] { "LOL!", "Try again.", "Unfortunate." };
-			case GEMSTONE_MIXTURE -> new String[] { "Meh", "Bruh", "Aw man" };
-			default -> new String[] { "Its not actually as rare as an alloy", "Hey its profit", "Cool" };
-		};
-		return pool[Math.abs(tagPick) % pool.length];
-	}
-
-	/** Win-shower multiplier from the luck roll (0.6 unlucky .. 1.5 blessed). */
-	public static synchronized double luckMult() {
-		return luckMult;
 	}
 
 	public static synchronized Stage stage() {
@@ -833,30 +1085,68 @@ public final class JackpotAnimation {
 		return stageProgress(Stage.MAXWIN);
 	}
 
-	public static synchronized long elapsedMillis() {
-		if (!active) {
-			return 0L;
+	/** 0..1 progress of the wheel's motion (reaches 1 at the stop, before any edge hold). */
+	private static synchronized double wheelMotionProgress() {
+		long now = System.currentTimeMillis();
+		if (wheelMotionEnd <= luckEnd) {
+			return 1.0;
 		}
-		return Math.max(0L, System.currentTimeMillis() - wheelEnd);
-	}
-
-	private static double easeOutQuint(double t) {
-		double u = 1.0 - t;
-		return 1.0 - u * u * u * u * u;
+		return Mth.clamp((now - luckEnd) / (double) (wheelMotionEnd - luckEnd), 0.0, 1.0);
 	}
 
 	/** Current wheel rotation in degrees (clockwise): cubic ease keeps a
-	 * visible creep through the finale instead of quint's long dead stop. */
+	 * visible creep through the finale; edge runs use quartic for a longer
+	 * crawl onto the boundary. */
 	public static synchronized double wheelAngle() {
-		float p = stageProgress(Stage.WHEEL);
-		double u = 1.0 - p;
-		return wheelStartAngle + wheelTotal * (1.0 - u * u * u);
+		long now = System.currentTimeMillis();
+		if (edgeRun && finale != null && now >= wheelMotionEnd) {
+			// Teeter: creeping toward the slip point / shoved back, then the call.
+			return wheelParkAngle + (finale.m0 - finale.margin(now));
+		}
+		double u = 1.0 - wheelMotionProgress();
+		return wheelStartAngle + wheelTotal * (1.0 - Math.pow(u, wheelEase));
+	}
+
+	/** 0..1 progress of the wheel's actual spin (1 once it has stopped/parked). */
+	public static double motionProgress() {
+		return active ? wheelMotionProgress() : 0.0;
+	}
+
+	/** 0..1 how close the teetering flap is to going over (0 off the teeter). */
+	public static synchronized float edgeCloseness(long now) {
+		return active && edgeRun ? EdgeStress.closeness(now) : 0f;
+	}
+
+	/** Ms since the edge call was made (the snap or the roll-back), or -1. */
+	public static synchronized double edgeDecisionAge(long now) {
+		if (!active || !edgeRun || finale == null || now < finale.decisionAt) {
+			return -1.0;
+		}
+		return now - finale.decisionAt;
+	}
+
+	/** True when this edge run's call is a flip (snap over), false for a stay. */
+	public static synchronized boolean edgeFlip() {
+		return finale != null && finale.flip;
+	}
+
+	/** True while the flap is balanced on the tip, before the call. */
+	public static synchronized boolean edgeTeetering(long now) {
+		return active && edgeRun && finale != null && finale.teetering(now);
+	}
+
+	/** True when this spin edges a rare boundary (stress bed + vignette). */
+	public static synchronized boolean edgeRun() {
+		return active && edgeRun;
 	}
 
 	/**
 	 * Live wheel speed in revolutions per minute (derivative of the ease in
 	 * {@link #wheelAngle()}). Measured at 100% wheel speed, so the speed
 	 * slider never decides whether the wheel burns — only spin power does.
+	 * Always the cubic-ease speed: an edge run's quartic crawl starts a
+	 * third faster, and that must not light up fire/blur the same spin
+	 * power wouldn't otherwise earn.
 	 */
 	public static synchronized double wheelRpm() {
 		if (!active || stage() != Stage.WHEEL) {
@@ -866,7 +1156,9 @@ public final class JackpotAnimation {
 		if (s <= 0f) {
 			return 0.0;
 		}
-		return wheelDegPerSec() / s / 6.0;
+		double u = 1.0 - wheelMotionProgress();
+		double durSec = Math.max(1L, wheelMotionEnd - luckEnd) / 1000.0;
+		return 3.0 * wheelTotal * u * u / durSec / s / 6.0;
 	}
 
 	/** Motion-blur strength 0..1: snaps in with RPM, fades out slowly (see tickHeat). */
@@ -882,9 +1174,12 @@ public final class JackpotAnimation {
 		if (!active || stage() != Stage.WHEEL) {
 			return 0.0;
 		}
-		double u = 1.0 - stageProgress(Stage.WHEEL);
-		double durSec = Math.max(1L, wheelEnd - luckEnd) / 1000.0;
-		return 3.0 * wheelTotal * u * u / durSec;
+		double u = 1.0 - wheelMotionProgress();
+		if (u <= 0.0) {
+			return 0.0;
+		}
+		double durSec = Math.max(1L, wheelMotionEnd - luckEnd) / 1000.0;
+		return wheelEase * wheelTotal * Math.pow(u, wheelEase - 1.0) / durSec;
 	}
 
 	/** Rim fire intensity 0..1 (0 = no fire). */
@@ -928,18 +1223,26 @@ public final class JackpotAnimation {
 		return ((-theta % 360.0) + 360.0) % 360.0;
 	}
 
-	public static DropType segmentAt(double restAngle) {
-		double a = ((restAngle % 360.0) + 360.0) % 360.0;
-		for (Slice s : SLICES) {
-			if (a >= s.start() && a < s.end()) {
-				return s.type();
+	/** Slice the flapper is reading at wheel rotation {@code theta}. */
+	private static synchronized int readSlice(double theta) {
+		double rho = pointerRestAngle(theta);
+		double b0 = bounds[0];
+		double x = ((rho - b0) % 360.0 + 360.0) % 360.0;
+		for (int k = bounds.length - 1; k >= 0; k--) {
+			if (x >= ((bounds[k] - b0) % 360.0 + 360.0) % 360.0) {
+				return k;
 			}
 		}
-		return DropType.QUICK_CLAW;
+		return 0;
 	}
 
 	public static DropType leaderType() {
-		return segmentAt(pointerRestAngle(wheelAngle()));
+		return leaderType(wheelAngle());
+	}
+
+	/** What the flapper reads at rotation {@code theta} (pass the frame's own theta). */
+	public static DropType leaderType(double theta) {
+		return SLICES[readSlice(theta)].type();
 	}
 
 	/** Wheel segment fill color (bright for visibility on the dim backdrop). */
@@ -952,6 +1255,7 @@ public final class JackpotAnimation {
 			case DIVAN_FRAGMENT -> 0xFFC2A94E;
 			case GEMSTONE_MIXTURE -> 0xFF7B3FAE;
 			case FLAWLESS_GEMSTONE -> 0xFFFF6EC7;
+			case PRECIOUS_PEARL -> 0xFFD9CBEF;
 		};
 	}
 
@@ -976,9 +1280,18 @@ public final class JackpotAnimation {
 			long now = System.currentTimeMillis();
 			if (now >= seqEnd) {
 				active = false;
+				if (!previewRun && type != DropType.DIVANS_ALLOY && landedSlice >= 0) {
+					int ns = SLICES.length;
+					if (SLICES[(landedSlice + 1) % ns].type() == DropType.DIVANS_ALLOY
+						|| SLICES[(landedSlice + ns - 1) % ns].type() == DropType.DIVANS_ALLOY) {
+						Achievements.onWheelNextToAlloy();
+					}
+				}
+				landedSlice = -1;
 				previewRun = false;
 				wheelBlurSmooth = 0;
 				COINS.clear();
+				EdgeStress.stop();
 				return;
 			}
 			stage = stage();
@@ -1000,16 +1313,11 @@ public final class JackpotAnimation {
 
 		// The sky stays clean until the reveal: coins only fall in MAXWIN.
 		// (Pre-wheel golds would leak the outcome's intensity early.)
+		// The rain thickens with every tier the counter breaks.
 		double rate = 0.0;
 		if (stage == Stage.MAXWIN) {
-			double luckBoost = luckMult;
-			rate = switch (t.tier) {
-				case LOSE -> 25.0 * s;
-				case SMALL -> 60.0 * s;
-				case MAJOR -> 120.0 * s;
-				case JACKPOT -> 190.0 * s;
-				case MEGA -> 235.0 * s;
-			} * luckBoost;
+			int rt = WinRollup.tier(rollupTime(now));
+			rate = (25.0 + 38.0 * (rt + 1)) * s * luckMult;
 		}
 		int w = screenW;
 		int h = screenH;
@@ -1038,7 +1346,8 @@ public final class JackpotAnimation {
 		if (stage == Stage.WHEEL) {
 			tickWheelSounds(client, now, s, (float) dt);
 		} else if (stage == Stage.MAXWIN) {
-			tickMaxwinSounds(client, now, s, t);
+			// Roll-up sounds run per render frame (see frame()).
+			tickFlapperDecay((float) dt);
 		} else if (stage == Stage.POWER || stage == Stage.LUCK) {
 			tickMiniSounds(client, now, s, stage);
 		} else {
@@ -1076,7 +1385,7 @@ public final class JackpotAnimation {
 		if (!locked && now >= nextMiniAt) {
 			nextMiniAt = now + (long) (90 / s);
 			try {
-				playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.4f, 0.8f + p * 0.6f);
+				playJackpot(client, NucleusSoundPack.current().tick(), 0.4f, 0.8f + p * 0.6f);
 			} catch (Exception ignored) {
 			}
 		}
@@ -1094,41 +1403,50 @@ public final class JackpotAnimation {
 
 	/** Lock verdict: dragon roar above 60, ding for good, thud for bad. */
 	private static void miniLockSound(Minecraft client, Stage stage) {
+		NucleusSoundPack.Pack pack = NucleusSoundPack.current();
 		try {
 			if (stage == Stage.POWER) {
 				if (powerRoll() > 60) {
-					playJackpot(client, SoundEvents.ENDER_DRAGON_GROWL, 0.9f, 1.0f);
-					playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.7f, 1.6f);
+					playJackpot(client, pack.big(), 0.9f, 1.0f);
+					playJackpot(client, pack.good(), 0.7f, verdictPitch(pack, 1.6f));
 					return;
 				}
 				String label = powerLabel();
 				if (label.equals("Powerful")) {
-					playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.7f, 1.5f);
+					playJackpot(client, pack.good(), 0.7f, verdictPitch(pack, 1.5f));
 				} else if (label.equals("Decent")) {
-					playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.6f, 1.2f);
+					playJackpot(client, pack.good(), 0.6f, verdictPitch(pack, 1.2f));
 				} else {
-					playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.5f, 0.45f);
+					playJackpot(client, pack.bad(), 0.5f, verdictPitch(pack, 0.45f));
 				}
 				return;
 			}
 			if (luckRoll() > 60) {
-				playJackpot(client, SoundEvents.ENDER_DRAGON_GROWL, 0.9f, 1.1f);
-				playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.7f, 1.7f);
+				playJackpot(client, pack.big(), 0.9f, 1.1f);
+				playJackpot(client, pack.good(), 0.7f, verdictPitch(pack, 1.7f));
 				return;
 			}
 			String label = luckLabel();
 			if (label.equals("Lucky")) {
-				playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.7f, 1.5f);
+				playJackpot(client, pack.good(), 0.7f, verdictPitch(pack, 1.5f));
 			} else if (label.equals("Average")) {
-				playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.6f, 1.0f);
+				playJackpot(client, pack.good(), 0.6f, verdictPitch(pack, 1.0f));
 			} else if (label.equals("Unlucky")) {
-				playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.5f, 0.6f);
+				playJackpot(client, pack.bad(), 0.5f, verdictPitch(pack, 0.6f));
 			} else {
-				playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.5f, 0.4f);
-				playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.4f, 0.3f);
+				playJackpot(client, pack.bad(), 0.5f, verdictPitch(pack, 0.4f));
+				playJackpot(client, pack.bad(), 0.4f, verdictPitch(pack, 0.3f));
 			}
 		} catch (Exception ignored) {
 		}
+	}
+
+	/** Classic pitches its one sound up and down to tell verdicts apart; other packs have their own sounds, so stay nearer their real pitch. */
+	private static float verdictPitch(NucleusSoundPack.Pack pack, float pitch) {
+		if (pack.id().equals("classic")) {
+			return pitch;
+		}
+		return Math.max(0.5f, Math.min(2.0f, 1.0f + (pitch - 1.0f) * 0.4f));
 	}
 
 	/**
@@ -1153,15 +1471,13 @@ public final class JackpotAnimation {
 	private static void onEnterStage(Stage stage, Minecraft client) {
 		long now = System.currentTimeMillis();
 		if (stage == Stage.INTRO) {
-			try {
-				if (client.player != null) {
-					playJackpot(client, SoundEvents.FIREWORK_ROCKET_LAUNCH, 0.7f, 1.0f);
-				}
-			} catch (Exception ignored) {
-			}
+			// Intro sounds are all frame-timed (see frame()).
 		} else if (stage == Stage.WHEEL) {
-			lastLeader = null;
 			nextHeartAt = now;
+			// Freshest price (the refresh kicked at start has had ~7s).
+			planRollup();
+			scheduleMusic();
+			scheduleClicks();
 		} else if (stage == Stage.POWER || stage == Stage.LUCK) {
 			// Mini gambles open quietly; the rollover ticks + lock ding
 			// come from tickMiniSounds.
@@ -1170,10 +1486,8 @@ public final class JackpotAnimation {
 			// MAXWIN opening: flash is rendered; fanfare here, plus the
 			// 3D item pop stretched across the whole phase (same popup
 			// the dye celebration uses, timed to its screen).
-			nextSoundAt = now;
-			nextBlastAt = now;
-			nextMegaAt = now;
-			soundStep = 0;
+			// The chill pad rings on under the reveal, then bows out.
+			EdgeStress.release(now + 350L, 1400L);
 			fireTotem(type());
 			// Pre-seed the shower across the screen so the reveal opens
 			// mid-downpour instead of an empty sky.
@@ -1186,32 +1500,32 @@ public final class JackpotAnimation {
 				}
 			}
 			try {
-				if (client.player != null) {
+				if (client.player != null && WinMusic.playing()) {
+					// The generated score carries the hit; keep SkyBlock's ding on top.
+					playJackpot(client, NucleusSoundPack.current().lock(), 0.6f, 1.0f);
+				} else if (client.player != null) {
 					DropType t = type();
 					switch (t.tier) {
-						case LOSE ->
-							// Sad trombone: one low plink, pitch already falling.
-							playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.5f, 0.5f);
-						case SMALL -> {
-							playJackpot(client, SoundEvents.PLAYER_LEVELUP, 0.7f, 1.0f);
-							playJackpot(client, SoundEvents.FIREWORK_ROCKET_BLAST, 0.3f, 1.0f);
+						case LOSE, SMALL -> {
+							playJackpot(client, NucleusSoundPack.current().lock(), 0.7f, 1.0f);
+							playJackpot(client, NucleusSoundPack.current().id().equals("classic") ? SoundEvents.FIREWORK_ROCKET_BLAST : NucleusSoundPack.current().coin(), 0.3f, 1.0f);
 						}
 						case MAJOR -> {
-							playJackpot(client, SoundEvents.PLAYER_LEVELUP, 0.9f, 1.0f);
-							playJackpot(client, SoundEvents.END_PORTAL_SPAWN, 0.8f, 1.0f);
-							playJackpot(client, SoundEvents.FIREWORK_ROCKET_LARGE_BLAST, 0.4f, 0.9f);
+							playJackpot(client, NucleusSoundPack.current().lock(), 0.9f, 1.0f);
+							playJackpot(client, NucleusSoundPack.current().id().equals("classic") ? SoundEvents.END_PORTAL_SPAWN : NucleusSoundPack.current().big(), 0.8f, 1.0f);
+							playJackpot(client, NucleusSoundPack.current().id().equals("classic") ? SoundEvents.FIREWORK_ROCKET_LARGE_BLAST : NucleusSoundPack.current().tierUp(), 0.4f, 0.9f);
 						}
 						case JACKPOT -> {
-							playJackpot(client, SoundEvents.PLAYER_LEVELUP, 1.0f, 1.1f);
-							playJackpot(client, SoundEvents.END_PORTAL_SPAWN, 0.9f, 1.1f);
-							playJackpot(client, SoundEvents.FIREWORK_ROCKET_LARGE_BLAST, 0.6f, 1.0f);
-							playJackpot(client, SoundEvents.FIREWORK_ROCKET_BLAST, 0.6f, 1.2f);
+							playJackpot(client, NucleusSoundPack.current().lock(), 1.0f, 1.1f);
+							playJackpot(client, NucleusSoundPack.current().id().equals("classic") ? SoundEvents.END_PORTAL_SPAWN : NucleusSoundPack.current().big(), 0.9f, 1.1f);
+							playJackpot(client, NucleusSoundPack.current().id().equals("classic") ? SoundEvents.FIREWORK_ROCKET_LARGE_BLAST : NucleusSoundPack.current().tierUp(), 0.6f, 1.0f);
+							playJackpot(client, NucleusSoundPack.current().id().equals("classic") ? SoundEvents.FIREWORK_ROCKET_BLAST : NucleusSoundPack.current().coin(), 0.6f, 1.2f);
 						}
 						case MEGA -> {
-							playJackpot(client, SoundEvents.PLAYER_LEVELUP, 1.0f, 1.2f);
-							playJackpot(client, SoundEvents.END_PORTAL_SPAWN, 1.0f, 1.2f);
-							playJackpot(client, SoundEvents.FIREWORK_ROCKET_LARGE_BLAST, 0.7f, 1.0f);
-							playJackpot(client, SoundEvents.FIREWORK_ROCKET_BLAST, 0.7f, 1.3f);
+							playJackpot(client, NucleusSoundPack.current().lock(), 1.0f, 1.2f);
+							playJackpot(client, NucleusSoundPack.current().id().equals("classic") ? SoundEvents.END_PORTAL_SPAWN : NucleusSoundPack.current().big(), 1.0f, 1.2f);
+							playJackpot(client, NucleusSoundPack.current().id().equals("classic") ? SoundEvents.FIREWORK_ROCKET_LARGE_BLAST : NucleusSoundPack.current().tierUp(), 0.7f, 1.0f);
+							playJackpot(client, NucleusSoundPack.current().id().equals("classic") ? SoundEvents.FIREWORK_ROCKET_BLAST : NucleusSoundPack.current().coin(), 0.7f, 1.3f);
 						}
 					}
 				}
@@ -1234,12 +1548,14 @@ public final class JackpotAnimation {
 
 	private static void tickWheelSounds(Minecraft client, long now, float s, float dt) {
 		float p = stageProgress(Stage.WHEEL);
-		// Pegs flick the flapper as they pass under the pointer. The rest
-		// angle under the pointer decreases as the wheel spins clockwise.
+		// Fallback only (layouts where the flap can't reach the pegs, e.g.
+		// 4:3): pegs flick a free spring as they pass the pointer. Normally
+		// FlapperPhysics does the real contact, per frame (flapperAngle).
 		double rel = pointerRestAngle(wheelAngle());
 		int idx = pegIndexAt(rel);
-		if (lastPegIdx >= 0) {
-			int crossed = (lastPegIdx - idx + PEG_ANGLES.length) % PEG_ANGLES.length;
+		boolean physical = FlapperPhysics.reaches();
+		if (lastPegIdx >= 0 && !physical) {
+			int crossed = (lastPegIdx - idx + FlapperPhysics.PEGS) % FlapperPhysics.PEGS;
 			if (crossed > 0 && crossed < 8) {
 				// Pegs strike the tip in their direction of travel: the tip
 				// hangs below the pivot, so a clockwise push is NEGATIVE in
@@ -1249,7 +1565,8 @@ public final class JackpotAnimation {
 					&& now - lastKickSoundAt > (long) (45 / s)) {
 					lastKickSoundAt = now;
 					try {
-						playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.4f, 1.0f + 0.5f * p);
+						playJackpot(client, NucleusSoundPack.current().click(),
+							0.4f * NucleusSoundPack.current().clickGain(), (1.0f + 0.5f * p) * NucleusSoundPack.current().clickPitch());
 					} catch (Exception ignored) {
 					}
 				}
@@ -1257,16 +1574,26 @@ public final class JackpotAnimation {
 		}
 		lastPegIdx = idx;
 
-		lastLeader = leaderType();
-		tickFlapperDecay(dt);
+		if (!physical) {
+			tickFlapperDecay(dt);
+		}
+		EdgeStress.tick(now);
 		if (client.player == null) {
 			return;
 		}
-		// Heartbeat blasts near the landing.
-		if (p > 0.75f && now >= nextHeartAt) {
+		// Heartbeat blasts near the landing (edge runs have the stress bed's own heart).
+		if (!edgeRun && p > 0.75f && now >= nextHeartAt) {
 			nextHeartAt = now + (long) (600 / s);
 			try {
-				playJackpot(client, SoundEvents.FIREWORK_ROCKET_BLAST, 0.22f, 0.5f);
+				NucleusSoundPack.Pack pk = NucleusSoundPack.current();
+				net.minecraft.sounds.SoundEvent beat = NucleusSoundPack.drum(pk);
+				if (beat != null) {
+					playJackpot(client, beat, 0.35f, 0.7f);
+				} else if (pk.id().equals("classic")) {
+					playJackpot(client, NucleusSoundPack.current().id().equals("classic") ? SoundEvents.FIREWORK_ROCKET_BLAST : NucleusSoundPack.current().coin(), 0.22f, 0.5f);
+				} else {
+					playJackpot(client, pk.tick(), 0.25f, 0.5f);
+				}
 			} catch (Exception ignored) {
 			}
 		}
@@ -1280,7 +1607,23 @@ public final class JackpotAnimation {
 			}
 			ItemStack stack = t.stack();
 			if (stack != null && !stack.isEmpty()) {
-				int ticks = Mth.clamp(Math.round(maxwinMs(t) / 50f / speedCeleb()), 1, 200);
+				long maxwinMs;
+				synchronized (JackpotAnimation.class) {
+					maxwinMs = seqEnd - wheelEnd;
+				}
+				int ticks = Mth.clamp(Math.round(maxwinMs / 50f), 1, ItemPopup.MAX_TICKS);
+				// Peak (closest, biggest) on the last "X WIN" banner, or on
+				// the lock for drops that never break a tier.
+				double[] ends = WinRollup.segEnds();
+				double land = WinRollup.landAt();
+				double peakRm = land;
+				for (int i = ends.length - 2; i >= 0; i--) {
+					if (ends[i] < land - 1.0) {
+						peakRm = ends[i];
+						break;
+					}
+				}
+				float peak = (float) Mth.clamp((peakRm / speedCeleb() + 250.0) / Math.max(1.0, maxwinMs), 0.2, 0.75);
 				// Claw's paw lives on the head's side: park the readable
 				// dwell there, otherwise it only flashes by mid-sweep.
 				// Alloy gets a slight turn so its face catches the light.
@@ -1289,91 +1632,150 @@ public final class JackpotAnimation {
 					case DIVANS_ALLOY -> 180f;
 					default -> 0f;
 				};
-				ItemPopup.popup(stack.copy(), ticks, false, true, true, yaw);
+				ItemPopup.lighting = null;
+				ItemPopup.popup(stack.copy(), ticks, false, true, false, yaw, peak);
 			}
 		} catch (Exception ignored) {
 		}
 	}
 
-	/** Tip pose straight from the spring. */
+	/**
+	 * Flap pose for this frame. With the physical layout it's the contact
+	 * sim (pegs lever the flap over and slip off the tip; each slip is a
+	 * click on the exact frame it happens); otherwise the old free spring.
+	 * Called once per render frame (main thread, same as tick).
+	 */
 	public static double flapperAngle() {
-		// Edging removed: spring only, always.
-		return flapperAngle;
+		return flapperAngle(wheelAngle());
+	}
+
+	/** Flap pose for this frame at the frame's own wheel rotation {@code theta}. */
+	public static double flapperAngle(double theta) {
+		long now = System.currentTimeMillis();
+		float p;
+		synchronized (JackpotAnimation.class) {
+			if (!active || stage() != Stage.WHEEL || !FlapperPhysics.reaches()) {
+				return Mth.clamp(flapperAngle, -0.6, 0.6);
+			}
+			p = stageProgress(Stage.WHEEL);
+		}
+		int slips = FlapperPhysics.step(theta, now);
+		if (slips > 0 && !clicksScheduled && now - lastKickSoundAt > 40L) {
+			lastKickSoundAt = now;
+			Minecraft client = Minecraft.getInstance();
+			playJackpot(client, NucleusSoundPack.current().click(),
+							0.4f * NucleusSoundPack.current().clickGain(), (1.0f + 0.5f * p) * NucleusSoundPack.current().clickPitch());
+		}
+		return FlapperPhysics.angle();
+	}
+
+	/** Roll-up clock: MAXWIN wall time scaled by the celebration speed. */
+	private static synchronized double rollupTime(long now) {
+		return Math.max(0L, now - wheelEnd) * (double) speedCeleb();
+	}
+
+	/** Wall ms since MAXWIN began. */
+	public static synchronized long maxwinElapsedMs(long now) {
+		return Math.max(0L, now - wheelEnd);
+	}
+
+	/** Wall ms until the sequence ends. */
+	public static synchronized long maxwinRemainingMs(long now) {
+		return Math.max(0L, seqEnd - now);
+	}
+
+	/** Roll-up clock for the HUD (see {@link WinRollup}). */
+	public static double rollupTimeNow() {
+		return rollupTime(System.currentTimeMillis());
+	}
+
+	/** Intro clock in pre-speed ms (letters slam on this). */
+	public static synchronized double introTimeNow() {
+		return Math.max(0L, System.currentTimeMillis() - seqStart) * (double) speedEarly();
+	}
+
+	/** Edge stress 0..1 for the vignette (0 off edge runs). */
+	public static synchronized float edgeStress(long now) {
+		return active && edgeRun ? EdgeStress.intensity(now) : 0f;
+	}
+
+	/** Heartbeat envelope shared with the stress audio. */
+	public static synchronized float edgePulse(long now) {
+		return active && edgeRun ? EdgeStress.pulse(now) : 0f;
+	}
+
+	/** Coins blasted up from the bottom edge (tier breaks, the final lock). */
+	public static synchronized void burstCoins(int n) {
+		int w = screenW;
+		int h = screenH;
+		double g = 520.0 * speedCeleb();
+		double reach = Math.sqrt(2.0 * g * h * 0.85);
+		for (int i = 0; i < n && COINS.size() < MAX_COINS; i++) {
+			Coin c = randomCoin(w, type, false);
+			c.x = w * 0.5 + (Math.random() - 0.5) * w * 0.7;
+			c.y = h + 4;
+			c.vx = (Math.random() - 0.5) * 320;
+			c.vy = -reach * (0.55 + 0.45 * Math.random());
+			COINS.add(c);
+		}
+	}
+
+	/**
+	 * Per-render-frame hook for sounds that must land on the exact frame
+	 * their visual does: intro letter slams and the whole roll-up. Safe to
+	 * call more than once per frame (only new moments fire).
+	 */
+	public static void frame(Minecraft client) {
+		long now = System.currentTimeMillis();
+		long prev;
+		Stage stage;
+		synchronized (JackpotAnimation.class) {
+			if (!active) {
+				return;
+			}
+			prev = lastFrameAt;
+			lastFrameAt = now;
+			stage = stage();
+		}
+		if (prev == 0L || now <= prev || client.player == null) {
+			return;
+		}
+		// After a hitch, still fire what just happened, never a backlog.
+		prev = Math.max(prev, now - 400L);
+		if (stage == Stage.INTRO) {
+			double sE;
+			long start;
+			synchronized (JackpotAnimation.class) {
+				sE = speedEarly();
+				start = seqStart;
+			}
+			double t0 = (prev - start) * sE;
+			double t1 = (now - start) * sE;
+			for (int i = 0; i < INTRO_LETTERS; i++) {
+				// Impact = when the slam's overshoot first touches full size
+				// (easeOutBack c1=2.2 hits 1.0 at 31% of the 170ms slam).
+				double at = INTRO_LETTER_AT + i * INTRO_LETTER_STEP + 53.0;
+				if (t0 < at && t1 >= at) {
+					// Same coin chink as the roll-up's count, climbing per letter.
+					playJackpot(client, NucleusSoundPack.current().coin(), 0.32f,
+						(float) Math.min(2.0, 0.72 + i * 0.07 + (Math.random() - 0.5) * 0.04));
+				}
+			}
+		} else if (stage == Stage.MAXWIN) {
+			WinRollup.frame(client, rollupTime(prev), rollupTime(now), speedCeleb());
+		}
 	}
 
 	/** Index of the greatest peg angle at or below the pointer's rest-angle. */
 	private static int pegIndexAt(double relAngle) {
 		double a = ((relAngle % 360.0) + 360.0) % 360.0;
 		int best = 0;
-		for (int i = 0; i < PEG_ANGLES.length; i++) {
-			if (PEG_ANGLES[i] <= a) {
+		for (int i = 0; i < FlapperPhysics.PEGS; i++) {
+			if (FlapperPhysics.PEG_ANG[i] <= a) {
 				best = i;
 			}
 		}
 		return best;
-	}
-
-	private static void tickMaxwinSounds(Minecraft client, long now, float s, DropType t) {
-		if (client.player == null) {
-			return;
-		}
-		if (now >= nextSoundAt) {
-			float p = progress();
-			// Tempo, loudness and direction per tier: the lose theme
-			// sags downward slowly, wins climb faster and louder.
-			long interval;
-			float vol;
-			float pitch;
-			switch (t.tier) {
-				case LOSE -> {
-					interval = (long) (300 / s);
-					vol = 0.45f;
-					pitch = Math.max(0.35f, 0.9f - (soundStep % 12) * 0.05f - p * 0.2f);
-				}
-				case SMALL -> {
-					interval = (long) (140 / s);
-					vol = 0.55f;
-					pitch = 0.7f + (soundStep % 12) * 0.04f + p * 0.2f;
-				}
-				case MAJOR -> {
-					interval = (long) (90 / s);
-					vol = 0.65f;
-					pitch = 0.7f + (soundStep % 12) * 0.06f + p * 0.3f;
-				}
-				case JACKPOT -> {
-					interval = (long) (60 / s);
-					vol = 0.75f;
-					pitch = 0.75f + (soundStep % 14) * 0.06f + p * 0.35f;
-				}
-				default -> {
-					interval = (long) (45 / s);
-					vol = 0.8f;
-					pitch = 0.8f + (soundStep % 16) * 0.06f + p * 0.4f;
-				}
-			}
-			nextSoundAt = now + Math.max(30L, interval);
-			soundStep++;
-			try {
-				playJackpot(client, SoundEvents.EXPERIENCE_ORB_PICKUP, vol, pitch);
-			} catch (Exception ignored) {
-			}
-		}
-		if ((t.tier == Tier.MAJOR || t.tier == Tier.JACKPOT || t.tier == Tier.MEGA) && now >= nextBlastAt) {
-			nextBlastAt = now + (long) ((t.tier == Tier.MEGA ? 500L : t.tier == Tier.JACKPOT ? 550L : 850L) / s);
-			try {
-				playJackpot(client, SoundEvents.FIREWORK_ROCKET_BLAST,
-					t.tier == Tier.MEGA ? 0.5f : 0.4f, 1.0f);
-			} catch (Exception ignored) {
-			}
-		}
-		if ((t.tier == Tier.JACKPOT || t.tier == Tier.MEGA) && now >= nextMegaAt) {
-			nextMegaAt = now + (long) ((t.tier == Tier.MEGA ? 900L : 1100L) / s);
-			try {
-				playJackpot(client, SoundEvents.FIREWORK_ROCKET_LARGE_BLAST,
-					t.tier == Tier.MEGA ? 0.6f : 0.5f, 0.9f);
-			} catch (Exception ignored) {
-			}
-		}
 	}
 
 	private static Coin randomCoin(int w, DropType t, boolean neutral) {
@@ -1384,10 +1786,10 @@ public final class JackpotAnimation {
 		c.vy = 40 + Math.random() * 140;
 		c.size = 3 + (int) (Math.random() * 4);
 		int r = (int) (Math.random() * 3);
-		if (!neutral && t.tier == Tier.LOSE) {
-			c.color = r == 0 ? 0xFF777777 : r == 1 ? 0xFF555555 : 0xFF999999;
-		} else if (!neutral && t == DropType.JADE_DYE && Math.random() < 0.3) {
-			c.color = r == 0 ? 0xFF00AA00 : 0xFF55FF55;
+		if (!neutral && t == DropType.JADE_DYE && Math.random() < 0.75) {
+			// Jade rain: mostly emerald with bright mint flecks.
+			c.color = r == 0 ? 0xFF00AA00 : r == 1 ? 0xFF55FF55 : 0xFF00FFAA;
+			c.size += 1;
 		} else {
 			c.color = r == 0 ? 0xFFFF7F00 : r == 1 ? 0xFFFFA500 : 0xFFFFFF55;
 		}

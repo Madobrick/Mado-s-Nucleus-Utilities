@@ -105,7 +105,6 @@ public final class NucleusSoundPack {
 	}
 
 	private static final java.util.Map<SoundEvent, float[][]> PCM = new java.util.HashMap<>();
-	private static final float[][] NONE = new float[0][];
 
 	private static float[][] pcm(SoundEvent e) {
 		if (e == null) {
@@ -115,9 +114,13 @@ public final class NucleusSoundPack {
 			float[][] d = PCM.get(e);
 			if (d == null) {
 				d = SystemAudio.floatPcm(e);
-				PCM.put(e, d == null || d.length < 2 ? NONE : d);
+				if (d == null || d.length < 2) {
+					// Not cached: sounds may simply not be loaded yet (resource reload).
+					return null;
+				}
+				PCM.put(e, d);
 			}
-			return d == NONE ? null : d;
+			return d;
 		}
 	}
 

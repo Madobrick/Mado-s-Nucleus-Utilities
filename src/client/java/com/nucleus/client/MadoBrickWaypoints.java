@@ -34,7 +34,6 @@ public final class MadoBrickWaypoints {
 	private static final String[] LABELS = { "Waypoint 1", "Waypoint 2", "Waypoint 3" };
 
 	private static final List<Waypoint> WAYPOINTS = new ArrayList<>();
-	private static BlockPos lastOrigin = null;
 
 	/** Custom waypoints under the player's feet (up to MAX_CUSTOM, newest last). */
 	public static final int MAX_CUSTOM = 100;
@@ -46,7 +45,6 @@ public final class MadoBrickWaypoints {
 
 	public static synchronized void setFromOrigin(BlockPos origin) {
 		WAYPOINTS.clear();
-		lastOrigin = origin.immutable();
 		for (int i = 0; i < OFFSETS.length; i++) {
 			int[] o = OFFSETS[i];
 			BlockPos pos = origin.offset(o[0], o[1], o[2]);
@@ -56,14 +54,12 @@ public final class MadoBrickWaypoints {
 
 	public static synchronized void clear() {
 		WAYPOINTS.clear();
-		lastOrigin = null;
 		clearCustom();
 	}
 
 	/** Clears only the 3 temple waypoints (custom ones survive mode switches). */
 	public static synchronized void clearTemple() {
 		WAYPOINTS.clear();
-		lastOrigin = null;
 	}
 
 	public static synchronized void addCustom(BlockPos feetBlockBelow) {
@@ -151,15 +147,6 @@ public final class MadoBrickWaypoints {
 		return CUSTOM_WAYPOINTS.size();
 	}
 
-	// Backwards-compatible single-custom API (first custom, or null).
-	public static synchronized Waypoint getCustom() {
-		return CUSTOM_WAYPOINTS.isEmpty() ? null : CUSTOM_WAYPOINTS.get(0);
-	}
-
-	public static synchronized void setCustom(BlockPos feetBlockBelow) {
-		addCustom(feetBlockBelow);
-	}
-
 	public static synchronized List<Waypoint> snapshot() {
 		return new ArrayList<>(WAYPOINTS);
 	}
@@ -168,9 +155,6 @@ public final class MadoBrickWaypoints {
 		return !WAYPOINTS.isEmpty();
 	}
 
-	public static synchronized BlockPos lastOrigin() {
-		return lastOrigin;
-	}
 
 	public static int colorFor(int index) {
 		return switch (index) {

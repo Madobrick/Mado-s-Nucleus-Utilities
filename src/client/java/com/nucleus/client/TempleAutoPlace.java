@@ -48,7 +48,7 @@ public final class TempleAutoPlace {
 					|| entity instanceof AbstractClientPlayer) {
 					continue;
 				}
-				if (!namesOf(entity).contains("door guardian")) {
+				if (!MobHighlight.namesOf(entity).contains("door guardian")) {
 					continue;
 				}
 				Vec3 p = entity.position();
@@ -83,22 +83,5 @@ public final class TempleAutoPlace {
 		MadoBrickIslandWatcher.onCapture();
 		NucleusMod.LOGGER.info("Temple waypoints auto-placed from {}", feet);
 		MadoChat.chat(client, Component.literal("§b[MNU] §fTemple waypoints placed automatically."));
-	}
-
-	/** Custom name + display name, cleaned for matching. */
-	private static String namesOf(Entity entity) {
-		StringBuilder hay = new StringBuilder();
-		try {
-			if (entity.getCustomName() != null) {
-				hay.append(HollowsDetector.stripFormatting(
-					entity.getCustomName().getString()).toLowerCase()).append('\n');
-			}
-			if (entity.getDisplayName() != null) {
-				hay.append(HollowsDetector.stripFormatting(
-					entity.getDisplayName().getString()).toLowerCase());
-			}
-		} catch (Exception ignored) {
-		}
-		return hay.toString();
 	}
 }

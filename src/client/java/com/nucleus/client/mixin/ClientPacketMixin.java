@@ -3,7 +3,6 @@ package com.nucleus.client.mixin;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
-import net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket;
 import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
 import net.minecraft.network.protocol.game.ClientboundSoundPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
@@ -21,6 +20,7 @@ import com.nucleus.client.DivanDetectorSolver;
 import com.nucleus.client.NpcTradeWatch;
 import com.nucleus.client.NucleusClient;
 import com.nucleus.client.SafeMode;
+import com.nucleus.client.TerrorStacks;
 
 /**
  * Two pre-filter hooks. Chat is seen here BEFORE other mods can hide it, so
@@ -52,10 +52,10 @@ public class ClientPacketMixin {
 			String text = packet.content().getString();
 			if (packet.overlay()) {
 				DivanDetectorSolver.onActionBar(text);
+				TerrorStacks.onActionBar(text);
 				return;
 			}
 			NucleusClient.dispatchGameMessage(text);
-			DivanDetectorSolver.onGameMessage(text);
 		} catch (Exception ignored) {
 		}
 	}
@@ -63,7 +63,9 @@ public class ClientPacketMixin {
 	@Inject(method = "setActionBarText", at = @At("TAIL"))
 	private void nucleus$onActionBar(ClientboundSetActionBarTextPacket packet, CallbackInfo ci) {
 		try {
-			DivanDetectorSolver.onActionBar(packet.text().getString());
+			String text = packet.text().getString();
+			DivanDetectorSolver.onActionBar(text);
+			TerrorStacks.onActionBar(text);
 		} catch (Exception ignored) {
 		}
 	}
@@ -146,34 +148,5 @@ public class ClientPacketMixin {
 	@Inject(method = "handleSetEquipment", at = @At("TAIL"))
 	private void nucleus$onEquipment(ClientboundSetEquipmentPacket packet, CallbackInfo ci) {
 		NpcTradeWatch.nudge();
-	}
-
-	// Bal spawn/despawn poofs: big particle bursts go to BalWatch, which
-	// matches a magma cube in the middle on the tick thread (never here).
-	@Inject(method = "handleParticleEvent", at = @At("HEAD"))
-	private void nucleus$onParticles(ClientboundLevelParticlesPacket packet, CallbackInfo ci) {
-		try {
-			int count;
-			try {
-				count = packet.getCount();
-			} catch (Exception ignored) {
-				return;
-			}
-			if (count < 10) {
-				return;
-			}
-			String typeKey = "";
-			try {
-				var particle = packet.getParticle();
-				var type = particle.getType();
-				var key = net.minecraft.core.registries.BuiltInRegistries.PARTICLE_TYPE.getKey(type);
-				if (key != null) {
-					typeKey = key.toString();
-				}
-			} catch (Exception ignored) {
-			}
-			com.nucleus.client.BalWatch.onParticles(packet.getX(), packet.getY(), packet.getZ(), count, typeKey);
-		} catch (Exception ignored) {
-		}
 	}
 }

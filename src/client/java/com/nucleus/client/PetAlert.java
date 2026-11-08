@@ -11,9 +11,22 @@ import com.nucleus.NucleusMod;
 /**
  * Wrong-pet alert: warns while standing in the Crystal Nucleus or the
  * Mines of Divan with anything but the Mole equipped, once all 5 crystals
- * are picked up. Verdicts come from autopet/summon chat lines instantly,
- * else from the Pet tab widget once two consecutive reads agree — no
- * grace timer. Placements never count toward that — only actual pickups.
+ * are picked up. Placements never count toward that — only actual pickups.
+ *
+ * <p>Current-pet tracking works like SkyHanni's PetAPI: chat is the source
+ * of truth, the tab widget is the fallback.
+ * <ul>
+ * <li>"You summoned your X!" / "Autopet equipped your [Lvl N] X!" set the
+ * pet instantly and stay in force with no expiry;</li>
+ * <li>the Pet tab widget lags behind a swap by seconds, so it only
+ * overrides a chat verdict once it has shown a value that it <em>started</em>
+ * showing well after that chat line. A stale reading that was already
+ * there before you swapped can never bring the old pet back;</li>
+ * <li>pet state is not thrown away when you walk between the Nucleus and
+ * the Mines or teleport inside the lobby (your pet doesn't change); only a
+ * lobby/profile change resets it;</li>
+ * <li>a short grace after entering the zone gives you time to swap.</li>
+ * </ul>
  */
 public final class PetAlert {
 	private PetAlert() {
@@ -23,29 +36,36 @@ public final class PetAlert {
 	private static long lastAlertChatAt = 0L;
 	private static int tickCounter = 0;
 	private static boolean widgetFound = false;
-	private static String cachedPet = null;
-	private static List<String> lastWidgetLines = new ArrayList<>();
 	/** Where the player counts as being: 0 = elsewhere, 1 = nucleus, 2 = mines. */
 	private static int lastZone = 0;
-	/** Verdict stability for the tab path: consecutive identical reads required. */
+	/** When the current zone was entered (for the swap grace). */
+	private static long zoneEnteredAt = 0L;
+	/** Time to swap after walking in before the alert may fire. */
+	private static final long ENTRY_GRACE_MS = 3_000L;
+
+	/** Tab streak: the value the widget shows, how many reads in a row, since when. */
 	private static final int STABLE_READS = 2;
-	private static String stablePet = null;
-	private static int stableCount = 0;
-	/** Warps move further in one tick than any walk/etherwarp (61 blocks). */
-	private static final double TELEPORT_SQ = 64.0 * 64.0;
-	private static double lastX = 0.0;
-	private static double lastY = 0.0;
-	private static double lastZ = 0.0;
-	private static boolean hasPos = false;
-	/** Fresh autopet/chat verdict: name + level + arrival time, no tab wait. */
+	private static String tabPet = null;
+	private static int tabCount = 0;
+	private static long tabSinceAt = 0L;
+	/**
+	 * A tab value only beats a chat verdict if it first appeared this long
+	 * after the chat line (the widget refresh lag).
+	 */
+	private static final long TAB_LAG_MS = 3_000L;
+
+	/** Last chat verdict (no expiry). "" = despawned, null = unknown. */
 	private static String chatPet = null;
 	private static long chatPetAt = 0L;
-	private static final long CHAT_PET_FRESH_MS = 15_000L;
+
 	private static final java.util.regex.Pattern AUTOPET_EQUIP =
 		java.util.regex.Pattern.compile("^autopet equipped your \\[lvl (\\d+)\\] (.+?)!(\\s*view rule)?$",
 			java.util.regex.Pattern.CASE_INSENSITIVE);
 	private static final java.util.regex.Pattern SUMMONED =
-		java.util.regex.Pattern.compile("^you summoned your (.+?)!$",
+		java.util.regex.Pattern.compile("^you summoned your (.+?)!?$",
+			java.util.regex.Pattern.CASE_INSENSITIVE);
+	private static final java.util.regex.Pattern DESPAWNED =
+		java.util.regex.Pattern.compile("^you despawned your (.+?)!?$",
 			java.util.regex.Pattern.CASE_INSENSITIVE);
 	private static final java.util.regex.Pattern LVL_A =
 		java.util.regex.Pattern.compile("\\[?lvl\\.?\\s*\\d+\\]?\\s*(.+)",
@@ -58,60 +78,67 @@ public final class PetAlert {
 		warnedWidget = false;
 		lastAlertChatAt = 0L;
 		widgetFound = false;
-		cachedPet = null;
-		lastWidgetLines = new ArrayList<>();
 		lastZone = 0;
-		stablePet = null;
-		stableCount = 0;
-		hasPos = false;
+		zoneEnteredAt = 0L;
+		tabPet = null;
+		tabCount = 0;
+		tabSinceAt = 0L;
 		chatPet = null;
 		chatPetAt = 0L;
-	}
-
-	/** Raw widget lines after the Pet header (for /mado pet debug). */
-	public static List<String> lastWidgetLines() {
-		return new ArrayList<>(lastWidgetLines);
 	}
 
 	public static boolean widgetFound() {
 		return widgetFound;
 	}
 
+	/** The pet we believe is out right now (chat or tab), or null if unknown. */
 	public static String currentPet() {
-		return cachedPet;
+		String p = resolvedPet();
+		return p == null || p.isEmpty() ? null : p;
 	}
 
-	/** Chat autopet/summon lines: instantaneous, authoritative pet verdicts. */
+	/** Chat autopet/summon/despawn lines: instant, authoritative pet verdicts. */
 	public static void onGameMessage(String raw) {
 		if (raw == null) {
 			return;
 		}
-		String norm = HollowsDetector.stripFormatting(raw).toLowerCase().trim();
+		// Chat-stacking mods append " (2)", " (3)"... to repeated lines.
+		String norm = HollowsDetector.stripFormatting(raw).toLowerCase(Locale.ROOT).trim()
+			.replaceAll("\\s*\\(\\d+\\)$", "");
 		if (ChatLines.isPlayerChat(norm)) {
 			return;
 		}
 		try {
 			java.util.regex.Matcher m = AUTOPET_EQUIP.matcher(norm);
 			if (m.matches()) {
-				setChatPet(m.group(2).replaceAll("[\\[\\]]", "").trim());
+				setChatPet(cleanName(m.group(2)));
 				return;
 			}
 			m = SUMMONED.matcher(norm);
 			if (m.matches()) {
-				setChatPet(m.group(1).trim());
+				setChatPet(cleanName(m.group(1)));
 				return;
 			}
-			if (norm.contains("you despawned your")
-				|| norm.contains("switching to profile")
-				|| norm.contains("transferring you to a new island")) {
-				chatPet = null;
-				chatPetAt = 0L;
-				cachedPet = null;
-				stablePet = null;
-				stableCount = 0;
+			if (DESPAWNED.matcher(norm).matches()) {
+				// No pet out at all: that's wrong in the Nucleus too.
+				chatPet = "";
+				chatPetAt = System.currentTimeMillis();
+				return;
+			}
+			if (norm.contains("switching to profile")) {
+				resetLobby();
 			}
 		} catch (Exception ignored) {
 		}
+	}
+
+	private static String cleanName(String s) {
+		if (s == null) {
+			return null;
+		}
+		// Drop a leading "[Lvl 100]" if a variant line carries it.
+		String t = s.replaceAll("(?i)\\[lvl[^\\]]*\\]", "").replaceAll("[\\[\\]]", "").trim();
+		return t.isEmpty() ? null : t;
 	}
 
 	private static void setChatPet(String name) {
@@ -120,9 +147,21 @@ public final class PetAlert {
 		}
 		chatPet = name;
 		chatPetAt = System.currentTimeMillis();
-		// A fresh verdict voids old tab state so stale reads can't confirm it.
-		stablePet = null;
-		stableCount = 0;
+	}
+
+	/**
+	 * Chat verdict unless the tab has since settled on a value that only
+	 * started showing well after it; otherwise the settled tab value.
+	 */
+	private static String resolvedPet() {
+		boolean tabSettled = tabPet != null && tabCount >= STABLE_READS;
+		if (chatPet != null) {
+			boolean tabNewer = tabSettled && tabSinceAt > chatPetAt + TAB_LAG_MS;
+			if (!tabNewer) {
+				return chatPet;
+			}
+		}
+		return tabSettled ? tabPet : null;
 	}
 
 	/** 0 = elsewhere, 1 = Crystal Nucleus, 2 = Mines of Divan. */
@@ -143,11 +182,6 @@ public final class PetAlert {
 		return 0;
 	}
 
-	private static boolean freshChatPet() {
-		return chatPet != null && !chatPet.isEmpty()
-			&& System.currentTimeMillis() - chatPetAt < CHAT_PET_FRESH_MS;
-	}
-
 	/** True when the on-screen wrong-pet warning should show: Mole expected, anything else equipped. */
 	public static boolean alertActive() {
 		if (!NucleusMod.CONFIG.petAlertEnabled || currentZone() == 0) {
@@ -156,69 +190,40 @@ public final class PetAlert {
 		if (!CrystalTracker.hasAll()) {
 			return false;
 		}
-		String pet = null;
-		if (freshChatPet()) {
-			// Autopet/summon just told us: no tab wait, no grace.
-			pet = chatPet;
-		} else {
-			if (!widgetFound || cachedPet == null) {
-				return false;
-			}
-			if (stableCount < STABLE_READS || !cachedPet.equals(stablePet)) {
-				return false;
-			}
-			pet = cachedPet;
+		if (System.currentTimeMillis() - zoneEnteredAt < ENTRY_GRACE_MS) {
+			return false;
+		}
+		String pet = resolvedPet();
+		if (pet == null) {
+			// Unknown: never cry wolf.
+			return false;
 		}
 		return !pet.toLowerCase(Locale.ROOT).contains("mole");
 	}
 
 	public static void tick(Minecraft client) {
 		tickCounter++;
-		if (tickCounter % 20 != 0) {
-			return;
-		}
 		if (!NucleusMod.CONFIG.petAlertEnabled || client == null || client.player == null) {
 			return;
 		}
+		// Zone entry is checked every tick so the grace starts on time.
 		int zone = currentZone();
 		if (zone != lastZone) {
-			// Entered, left, or moved nucleus<->mines: tab data from the
-			// other side is stale — drop it (chat verdicts are timestamped
-			// and survive this).
-			cachedPet = null;
-			stablePet = null;
-			stableCount = 0;
+			// Walking out of a zone and straight back in (or nucleus<->mines)
+			// doesn't restart the grace: only coming from elsewhere does.
+			if (lastZone == 0 && zone != 0) {
+				zoneEnteredAt = System.currentTimeMillis();
+			}
 			lastZone = zone;
 		}
-		try {
-			double x = client.player.getX();
-			double y = client.player.getY();
-			double z = client.player.getZ();
-			if (hasPos) {
-				double dx = x - lastX;
-				double dy = y - lastY;
-				double dz = z - lastZ;
-				if (dx * dx + dy * dy + dz * dz > TELEPORT_SQ) {
-					// Teleport (/warp, spawn): sidebar + tab are stale for
-					// seconds afterward, so drop everything, chat included.
-					cachedPet = null;
-					stablePet = null;
-					stableCount = 0;
-					chatPet = null;
-					chatPetAt = 0L;
-				}
-			}
-			lastX = x;
-			lastY = y;
-			lastZ = z;
-			hasPos = true;
-		} catch (Exception ignored) {
+		if (tickCounter % 20 != 0) {
+			return;
 		}
 		if (!HollowsDetector.isInCrystalHollows()) {
 			return;
 		}
 		parseWidget(client);
-		if (!widgetFound) {
+		if (!widgetFound && chatPet == null) {
 			if (!warnedWidget) {
 				warnedWidget = true;
 				MadoChat.chat(client, net.minecraft.network.chat.Component.literal(
@@ -230,8 +235,9 @@ public final class PetAlert {
 			long now = System.currentTimeMillis();
 			if (now - lastAlertChatAt > 60_000L) {
 				lastAlertChatAt = now;
+				String pet = currentPet();
 				MadoChat.chat(client, net.minecraft.network.chat.Component.literal(
-					"§b[MNU] §cWrong pet equipped (§f" + cachedPet
+					"§b[MNU] §cWrong pet equipped (§f" + (pet == null ? "none" : pet)
 						+ "§c)! Equip your §aMole §cpet for powder."));
 			}
 		}
@@ -265,27 +271,43 @@ public final class PetAlert {
 			return;
 		}
 		int header = -1;
+		String inline = null;
 		for (int i = 0; i < tab.size(); i++) {
-			if (tab.get(i).equalsIgnoreCase("pet")) {
+			String t = tab.get(i).trim();
+			String lower = t.toLowerCase(Locale.ROOT);
+			// Widget header is "Pet:" (older layouts: "Pet"); some layouts put
+			// the pet on the same line ("Pet: [Lvl 100] Mole").
+			if (lower.equals("pet") || lower.equals("pet:")) {
 				header = i;
 				break;
 			}
+			if (lower.startsWith("pet:") && !lower.contains("xp") && !lower.contains("sitter")) {
+				header = i;
+				inline = t.substring(4).trim();
+				break;
+			}
 		}
-		List<String> following = new ArrayList<>();
-		if (header >= 0) {
+		String found = null;
+		if (inline != null && !inline.isEmpty()) {
+			found = parseLvlPet(inline);
+			if (found == null && !inline.toLowerCase(Locale.ROOT).contains("none")) {
+				found = inline;
+			}
+		}
+		if (found == null && header >= 0) {
+			List<String> following = new ArrayList<>();
 			// Never break early: XP/item lines ("Pet XP: ...") contain
 			// colons and must not hide the name line below them.
-			for (int i = header + 1; i < tab.size() && following.size() < 10; i++) {
+			for (int i = header + 1; i < tab.size() && following.size() < 4; i++) {
 				String line = tab.get(i).trim();
 				if (line.isEmpty()) {
 					continue;
 				}
 				following.add(line);
 			}
+			found = pickPetName(following);
 		}
-		lastWidgetLines = new ArrayList<>(following);
-		String found = pickPetName(following);
-		if (found == null) {
+		if (found == null && header < 0) {
 			// Fallback: a levelled-pet line anywhere in tab, whatever the
 			// header looks like.
 			for (String line : tab) {
@@ -297,13 +319,15 @@ public final class PetAlert {
 			}
 		}
 		widgetFound = header >= 0 || found != null;
-		cachedPet = found;
-		if (found != null && found.equals(stablePet)) {
-			stableCount++;
-		} else {
-			stablePet = found;
-			stableCount = found == null ? 0 : 1;
+		long now = System.currentTimeMillis();
+		if (found != null && found.equals(tabPet)) {
+			tabCount++;
+		} else if (found != null) {
+			tabPet = found;
+			tabCount = 1;
+			tabSinceAt = now;
 		}
+		// found == null: a blank read (widget mid-refresh) keeps the streak.
 	}
 
 	/** "[Lvl 100] Ghoul" / "Lvl 100 Ghoul" / "Ghoul [Lvl 100]" -> "Ghoul". */

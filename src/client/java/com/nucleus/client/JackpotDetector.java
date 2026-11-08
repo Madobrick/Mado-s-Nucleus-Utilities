@@ -29,8 +29,22 @@ public final class JackpotDetector {
 	private static final long BUNDLE_LOOP_TIMEOUT_MS = 30_000L;
 	/** Jaderalds seen in the current bundle block (for Double Trouble). */
 	private static int bundleJaderalds = 0;
+	/** Every loot line of the latest bundle block (for the MAXWIN total). */
+	private static final java.util.List<String> BUNDLE_LINES = new java.util.ArrayList<>();
+	private static long bundleLinesAt = 0L;
 
 	private JackpotDetector() {
+	}
+
+	/**
+	 * The latest bundle's loot lines if it opened within {@code maxAgeMs},
+	 * else an empty list. Main thread (chat and the wheel run there).
+	 */
+	public static java.util.List<String> recentBundleLines(long maxAgeMs) {
+		if (bundleLinesAt == 0L || System.currentTimeMillis() - bundleLinesAt > maxAgeMs) {
+			return java.util.List.of();
+		}
+		return new java.util.ArrayList<>(BUNDLE_LINES);
 	}
 
 	public static void reset() {
@@ -60,6 +74,10 @@ public final class JackpotDetector {
 		}
 		if (colorlessNorm.contains("quick claw")) {
 			return DropType.QUICK_CLAW;
+		}
+		// ~1 in 610 per bundle roll (rarer than a Claw): always spins.
+		if (colorlessNorm.contains("precious pearl")) {
+			return DropType.PRECIOUS_PEARL;
 		}
 		return null;
 	}
@@ -109,6 +127,8 @@ public final class JackpotDetector {
 			inBundleLoop = true;
 			bundleLoopStart = System.currentTimeMillis();
 			bundleJaderalds = 0;
+			BUNDLE_LINES.clear();
+			bundleLinesAt = bundleLoopStart;
 			// Run history keeps the latest bundle only: a new block wipes
 			// whatever the previous one collected.
 			SpeedrunManager.noteBundleBlockStart();
@@ -123,6 +143,7 @@ public final class JackpotDetector {
 				inBundleLoop = false;
 				bundleJaderalds = 0;
 				Achievements.closeBundle();
+				SpeedrunManager.noteBundleClosed();
 				return;
 			}
 		}
@@ -143,6 +164,12 @@ public final class JackpotDetector {
 		if (raw.startsWith("    ") && inBundleLoop
 			&& System.currentTimeMillis() - bundleLoopStart <= BUNDLE_LOOP_TIMEOUT_MS) {
 			Achievements.recordBundleItem(norm(raw));
+			if (BUNDLE_LINES.size() < 64) {
+				BUNDLE_LINES.add(HollowsDetector.stripFormatting(raw).trim());
+			}
+			// Run history: every framed loot line, verbatim (amounts included).
+			// Recorded even with the wheel switched off.
+			SpeedrunManager.noteBundleLoot(HollowsDetector.stripFormatting(raw).trim());
 		}
 
 		if (!NucleusMod.CONFIG.jackpotEnabled) {
@@ -159,8 +186,6 @@ public final class JackpotDetector {
 			if (!inBundleLoop) {
 				return;
 			}
-			// Run history: every framed loot line, verbatim (amounts included).
-			SpeedrunManager.noteBundleLoot(HollowsDetector.stripFormatting(raw).trim());
 			DropType t = matchItem(n);
 			if (t != null) {
 				JackpotAnimation.start(t);

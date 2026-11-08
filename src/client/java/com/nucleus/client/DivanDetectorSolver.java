@@ -1,14 +1,20 @@
 package com.nucleus.client;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -19,11 +25,40 @@ import net.minecraft.world.phys.Vec3;
  * Actionbar {@code TREASURE: 79.2m} gives distance; candidates whose
  * {@code dist(player, base-offset)} matches (0.1m) are waypoints.
  *
- * <p>Better here:
+ * <p>How it reads labels ("where could you have been"):
  * <ul>
- * <li>re-solves continuously while walking (4Hz), not just on 1Hz labels;</li>
- * <li>single-candidate pling + waypoint kept until loot + staleSpot healing.</li>
+ * <li>the server's number describes where you stood up to ~1-2s ago (ping
+ * plus its own refresh), so a label is matched against your whole path over
+ * the last {@link #LAG_TICKS} ticks: a spot stays possible only if the label
+ * falls inside the range of distances it had to that path (walking steps are
+ * treated as continuous, teleports as jumps). The real chest is always in
+ * that set whatever the lag was, so readings work mid-jump or mid-teleport
+ * without ever ruling the real chest out. Standing still collapses the path
+ * to one point and the test is as strict as before;</li>
+ * <li>a repeated number is not thrown away: it may be old, so it is matched
+ * against the previous reading's path <em>plus</em> where you are now. If
+ * you stand still after a reading that didn't fit, the repeats still land
+ * and the waypoint appears without moving;</li>
+ * <li>crouching: both the feet and the feet 0.08 lower are allowed, so the
+ * crouch rule can't break a match either way;</li>
+ * <li>a real chest block within 5m of you (the treasure only shows up once
+ * you're near) takes over the waypoint immediately, readings or not;</li>
+ * <li>waypoints render only once at most {@link #MAX_SHOWN} spots remain
+ * possible, so a vague moving reading never paints a field of guesses;</li>
+ * <li>positions are adjusted for sneaking: the server (1.8 rules) lowers the
+ * measuring point by 0.08 while you crouch;</li>
+ * <li>every still reading of the hunt must agree: the shown set is the
+ * candidates consistent with all of them. If none are (a loot line was
+ * missed and the hunt changed), the hunt restarts from the newest reading;</li>
+ * <li>waypoints stay up until the loot line says the chest was opened —
+ * they no longer vanish just because you walked within 5 blocks;</li>
+ * <li>42 known chest spots: SkyHanni's 39 plus 3 more NEU has seen;</li>
+ * <li>chest snap: a real chest block on a candidate spot ends the hunt;</li>
+ * <li>anchor search skips every chunk section without quartz stairs.</li>
  * </ul>
+ *
+ * <p>Main thread only: labels arrive in packet handlers after vanilla moved
+ * them to the client thread, and tick/render run there too.
  */
 public final class DivanDetectorSolver {
 	private DivanDetectorSolver() {
@@ -47,51 +82,79 @@ public final class DivanDetectorSolver {
 		{ 42, 38, 19 }, { -33, 39, 31 }, { 6, 39, 25 }, { -2, 38, -17 },
 		{ -15, 39, 5 }, { -20, 39, -12 }, { -25, 38, 30 }, { 28, 39, -35 },
 		{ -19, 39, -22 }, { 4, 38, -15 }, { 36, 38, 17 },
+		// Seen by NEU's list (CrystalMetalDetectorSolver) but missing from
+		// SkyHanni's; converted to anchor offsets (anchor = center + 5,17,5).
+		{ 46, 37, -17 }, { 37, 38, 45 }, { -18, 39, -21 },
 	};
 
+	/**
+	 * How far back a label may describe (ticks). Real hunt logs showed the
+	 * number lagging up to ~1s; 2s keeps a safe margin so the real chest is
+	 * never ruled out.
+	 */
+	private static final int LAG_TICKS = 40;
+	private static final int FEET_HISTORY = LAG_TICKS;
+	/** A tick step longer than this is a teleport: only its ends are real places. */
+	private static final double SLIDE_MAX = 1.5;
+	/** Extra slack on top of the 0.05 rounding (client vs server position). */
+	private static final double PATH_SLACK = 0.02;
+	/** Draw waypoints only once this few spots (or fewer) are possible. */
+	private static final int MAX_SHOWN = 3;
+	/** A chest block this close to the feet is the treasure (5m). */
+	private static final double SNAP_SQ = 25.0;
+	/** Cap on a chained repeat path (points). */
+	private static final int MAX_PATH = 400;
+	/** 1.8 servers measure a crouching player 0.08 lower. */
+	private static final double SNEAK_DROP = 0.08;
+	/** Labels kept per hunt; older ones add nothing once the set is down to one. */
+	private static final int MAX_READINGS = 12;
+	/** Label precision is 0.1m, so a true match is within half of that. */
+	private static final double LABEL_TOL = 0.051;
+	private static final long BASE_FAIL_COOLDOWN_MS = 5_000L;
+	/** The opened chest is the candidate within this of the feet at loot (6m). */
+	private static final double OPENED_SQ = 36.0;
+	/** Feet moved less than this (squared) over the snapshot = standing still. */
+	private static final double STILL_EPS_SQ = 1e-4;
+	/** Ticks of pre-loot history kept: the new chest can't be described from earlier. */
+	private static final int KEEP_AT_LOOT = 5;
+	/** Window after loot where a label fitting the opened chest is a trailing old one. */
+	private static final long STALE_AFTER_LOOT_MS = 3_000L;
+
+	/** Set by feetSnapshot: true when the whole snapshot is one spot. */
+	private static boolean snapshotStill = false;
+
+	private record Reading(Vec3[] feet, double distance) {
+	}
+
+	/** Chest spots (anchor - offset), rebuilt whenever the anchor changes. */
+	private static final List<BlockPos> CANDIDATES = new ArrayList<>();
 	private static final List<BlockPos> PREDICTED = new ArrayList<>();
+	/** Predicted spots that pass the near-player chest gate (what renders). */
+	private static final List<BlockPos> VISIBLE = new ArrayList<>();
+	private static final ArrayDeque<Reading> READINGS = new ArrayDeque<>();
+	private static final ArrayDeque<Vec3> FEET = new ArrayDeque<>();
+	/** Per-tick crouch flag, parallel to FEET. */
+	private static final ArrayDeque<Boolean> CROUCH = new ArrayDeque<>();
+
 	private static BlockPos base = null;
-	private static BlockPos ignorePos = null;
-	/** Last rendered real waypoint: the single ghost anchor. */
-	private static volatile BlockPos lastRealSpot = null;
-
-	/** Where the last real waypoint rendered (ghost anchor), may be null. */
-	public static BlockPos lastRealSpot() {
-		return lastRealSpot;
-	}
-
-	/** Remembers a rendered real waypoint as the ghost anchor. */
-	public static void noteRealSpot(BlockPos pos) {
-		try {
-			if (pos != null) {
-				lastRealSpot = pos.immutable();
-			}
-		} catch (Exception ignored) {
-		}
-	}
+	/** Anchor the self-heal threw out, so the re-search can't pick it again. */
+	private static BlockPos rejectedBase = null;
 	private static long lastBaseSearchMs = 0L;
-	/** Success cached long, failures retry fast so chunk streaming isn't punished. */
-	private static final long BASE_SUCCESS_COOLDOWN_MS = 60_000L;
-	private static final long BASE_FAIL_COOLDOWN_MS = 10_000L;
-	/** Packet thread asks, tick thread scans: never 610k blocks off-thread. */
-	private static volatile boolean wantBase = false;
-	/** Mines-of-Divan entry edge for eager base warm (set in tick). */
+	/** Walked-up spot, skipped until you're 10m away again. */
+	private static BlockPos ignorePos = null;
+	/** Nearest spot last shown: the dim ghost marker once nothing else shows. */
+	private static BlockPos lastRealSpot = null;
+	/** Chest block seen within 5m: overrides the readings until looted or gone. */
+	private static BlockPos snapped = null;
+	/** Path of the last raw label (a repeat may be that old). */
+	private static Vec3[] lastRawPath = null;
 	private static boolean wasInMines = false;
-	private static Double lastDistance = null;
-	private static long lastActionBarMs = 0L;
+	private static long outsideSinceMs = 0L;
+	private static long lastFoundMs = 0L;
 	private static int emptyStreak = 0;
 	private static double lastEmptyDist = Double.NaN;
-	private static BlockPos lastEmptyPos = null;
-	private static int minesOutsideStreak = 0;
-	private static int staleCount = 0;
-	private static BlockPos lastPlayerBlock = null;
-	private static boolean playedPling = false;
-	private static long lastFoundMs = 0L;
-	private static long lastSolveMs = 0L;
-	private static Double lastSolvedDist = null;
-	private static BlockPos lastSolvedPos = null;
-	/** Decimal-precise feet at the last harp solve (0.3m gating, not blocks). */
-	private static Vec3 lastEstFeet = null;
+	/** Last raw label value (repeats are dropped). */
+	private static double lastRawDist = Double.NaN;
 	private static int tickCounter = 0;
 
 	// Session hunt stats (survive waypoint clears, reset on server leave).
@@ -99,39 +162,22 @@ public final class DivanDetectorSolver {
 	private static long totalHuntMs = 0L;
 	private static long huntStartMs = 0L;
 
-	public static synchronized int treasuresFound() {
-		return treasuresFound;
-	}
-
-	public static synchronized String baseStatus() {
-		return base == null ? "-" : base.getX() + "," + base.getY() + "," + base.getZ();
-	}
-
-	public static synchronized int predictedCount() {
-		return PREDICTED.size();
-	}
-
-	public static synchronized Double lastLabelDistance() {
-		return lastDistance;
-	}
-
 	/** Mean chest-to-chest time per found treasure (-1 when none yet). */
-	public static synchronized long avgFindMs() {
-		if (treasuresFound <= 0) {
-			return -1L;
-		}
-		return totalHuntMs / treasuresFound;
+	public static long avgFindMs() {
+		return treasuresFound <= 0 ? -1L : totalHuntMs / treasuresFound;
 	}
 
-	public static synchronized List<BlockPos> snapshotPredicted() {
-		return new ArrayList<>(PREDICTED);
+	/** Spots to draw this frame (empty when none). */
+	public static List<BlockPos> visibleSpots() {
+		return VISIBLE;
 	}
 
-	public static synchronized boolean hasPredicted() {
-		return !PREDICTED.isEmpty();
+	/** Where the last real waypoint rendered (ghost anchor), may be null. */
+	public static BlockPos lastRealSpot() {
+		return lastRealSpot;
 	}
 
-	public static synchronized void clear() {
+	public static void clear() {
 		clearSpots();
 		treasuresFound = 0;
 		totalHuntMs = 0L;
@@ -139,76 +185,48 @@ public final class DivanDetectorSolver {
 		lastFoundMs = 0L;
 	}
 
-	/** Forgets waypoints/hunt state but keeps session stats + pitch table. */
-	public static synchronized void clearSpots() {
-		PREDICTED.clear();
-		base = null;
+	/** Forgets waypoints/hunt state but keeps the anchor and session stats. */
+	public static void clearSpots() {
+		resetHunt();
 		ignorePos = null;
-		lastDistance = null;
-		lastActionBarMs = 0L;
-		lastPlayerBlock = null;
-		playedPling = false;
-		lastBaseSearchMs = 0L;
-		lastSolveMs = 0L;
-		lastSolvedDist = null;
-		lastSolvedPos = null;
-		lastEstFeet = null;
-		huntStartMs = 0L;
-		emptyStreak = 0;
-		lastEmptyDist = Double.NaN;
-		lastEmptyPos = null;
-		staleCount = 0;
-		wantBase = false;
 		lastRealSpot = null;
+		huntStartMs = 0L;
 	}
 
 	public static void onLeave() {
 		clear();
+		base = null;
+		rejectedBase = null;
+		lastBaseSearchMs = 0L;
+		CANDIDATES.clear();
+		FEET.clear();
+		CROUCH.clear();
+		wasInMines = false;
+		outsideSinceMs = 0L;
 		tickCounter = 0;
-		try {
-			synchronized (DivanDetectorSolver.class) {
-				wasInMines = false;
-			}
-		} catch (Exception ignored) {
-		}
+	}
+
+	private static void resetHunt() {
+		PREDICTED.clear();
+		VISIBLE.clear();
+		READINGS.clear();
+		emptyStreak = 0;
+		lastEmptyDist = Double.NaN;
+		lastRawDist = Double.NaN;
+		lastRawPath = null;
+		snapped = null;
 	}
 
 	public static boolean isHoldingDetector(Minecraft client) {
-		try {
-			if (client == null || client.player == null) {
-				return false;
-			}
-			for (ItemStack stack : new ItemStack[] {
-				client.player.getMainHandItem(), client.player.getOffhandItem() }) {
-				if (stack == null || stack.isEmpty()) {
-					continue;
-				}
-				String name;
-				try {
-					name = stack.getHoverName().getString().toLowerCase();
-				} catch (Exception ignored) {
-					continue;
-				}
-				if (name.contains("metal detector")) {
-					return true;
-				}
-			}
-		} catch (Exception ignored) {
+		if (client == null || client.player == null) {
+			return false;
 		}
-		return false;
+		return isDetector(client.player.getMainHandItem()) || isDetector(client.player.getOffhandItem());
 	}
 
-	private static String strip(String s) {
-		StringBuilder out = new StringBuilder(s.length());
-		for (int i = 0; i < s.length(); i++) {
-			char c = s.charAt(i);
-			if (c == '§' && i + 1 < s.length()) {
-				i++;
-				continue;
-			}
-			out.append(c);
-		}
-		return out.toString();
+	private static boolean isDetector(ItemStack stack) {
+		return stack != null && !stack.isEmpty()
+			&& stack.getHoverName().getString().toLowerCase().contains("metal detector");
 	}
 
 	/** Actionbar / overlay treasure distance. */
@@ -217,15 +235,10 @@ public final class DivanDetectorSolver {
 			return;
 		}
 		Minecraft client = Minecraft.getInstance();
-		try {
-			if (!HollowsDetector.inMinesOfDivan(client)) {
-				return;
-			}
-		} catch (Exception ignored) {
+		if (client.player == null || client.level == null || !HollowsDetector.inMinesOfDivan(client)) {
 			return;
 		}
-		String clean = strip(raw);
-		Matcher m = TREASURE_DIST.matcher(clean);
+		Matcher m = TREASURE_DIST.matcher(HollowsDetector.stripFormatting(raw));
 		if (!m.find()) {
 			return;
 		}
@@ -235,547 +248,508 @@ public final class DivanDetectorSolver {
 		} catch (NumberFormatException ignored) {
 			return;
 		}
-		BlockPos curBlock = null;
-		try {
-			if (client.player != null) {
-				curBlock = client.player.blockPosition().immutable();
-			}
-		} catch (Exception ignored) {
+		// Suppress right after loot: the old treasure's label can trail it.
+		if (System.currentTimeMillis() - lastFoundMs < 500L) {
+			return;
 		}
-		synchronized (DivanDetectorSolver.class) {
-			// Single spot solved: keep it until the loot chat confirms the
-			// dig. Escape hatch for a stale single (missed loot line): if the
-			// label disagrees with the spot's true distance 3 labels in a
-			// row, it's a new hunt - drop it and re-solve below.
-			if (PREDICTED.size() == 1) {
-				lastDistance = distance;
-				lastActionBarMs = System.currentTimeMillis();
-				if (huntStartMs == 0L) {
-					huntStartMs = System.currentTimeMillis();
-				}
-				boolean stale = false;
-				try {
-					if (client.player != null) {
-						BlockPos only = PREDICTED.get(0);
-						Vec3 feet = client.player.position();
-						double dx = (double) only.getX() - feet.x;
-						double dy = (double) (only.getY() + 1) - feet.y;
-						double dz = (double) only.getZ() - feet.z;
-						double actual = Math.round(Math.sqrt(dx * dx + dy * dy + dz * dz) * 10.0) / 10.0;
-						stale = Math.abs(actual - distance) > 3.0;
-					}
-				} catch (Exception ignored) {
-				}
-				if (stale) {
-					if (++staleCount >= 3) {
-						PREDICTED.clear();
-						playedPling = false;
-						staleCount = 0;
-						huntStartMs = System.currentTimeMillis();
-						lastSolvedDist = null;
-						lastSolvedPos = null;
-					} else {
-						return;
-					}
-				} else {
-					staleCount = 0;
-					return;
-				}
-			}
-			// Same reading at same spot: nothing new to solve.
-			if (lastDistance != null && Double.compare(lastDistance, distance) == 0
-				&& curBlock != null && curBlock.equals(lastSolvedPos)
-				&& lastSolvedDist != null && Double.compare(lastSolvedDist, distance) == 0) {
+		Vec3 feetNow = client.player.position();
+		if (huntStartMs == 0L) {
+			huntStartMs = System.currentTimeMillis();
+		}
+		if (base == null) {
+			findBase(client);
+			if (base == null) {
 				return;
 			}
-			lastDistance = distance;
-			lastActionBarMs = System.currentTimeMillis();
-			if (huntStartMs == 0L) {
-				huntStartMs = System.currentTimeMillis();
+		}
+		Vec3[] path = feetSnapshot(feetNow, client.player.isCrouching());
+		boolean still = snapshotStill;
+		// A trailing label for the chest just opened (its value still fits
+		// that spot from where you stand): not the new treasure, skip it so
+		// it can't count as a miss or seed the repeat chain.
+		if (ignorePos != null && System.currentTimeMillis() - lastFoundMs < STALE_AFTER_LOOT_MS
+			&& fitsPath(ignorePos, path, distance)) {
+			return;
+		}
+		// Same number as last time: either it's current, or the server re-sent
+		// an old value. It can't be older than the previous label, so match it
+		// against that label's path plus everything since (null = a break, no
+		// segment drawn across it). It replaces the previous reading.
+		// Exception: if you haven't moved for the whole lag window, the label
+		// describes exactly where you stand, so the tight one-point path is
+		// used. Chaining here kept the old walk-up path forever and the
+		// waypoint never appeared until you moved.
+		boolean repeat = !Double.isNaN(lastRawDist) && Math.abs(lastRawDist - distance) < 0.01;
+		if (repeat && still) {
+			Reading prev = READINGS.peekLast();
+			if (prev != null && Math.abs(prev.distance() - distance) < 0.01) {
+				READINGS.removeLast();
+			}
+		} else if (repeat && lastRawPath != null) {
+			int n = Math.min(MAX_PATH, path.length + 1 + lastRawPath.length);
+			Vec3[] joined = new Vec3[n];
+			int k = 0;
+			for (int i = 0; i < path.length && k < n; i++) {
+				joined[k++] = path[i];
+			}
+			if (k < n) {
+				joined[k++] = null;
+			}
+			for (int i = 0; i < lastRawPath.length && k < n; i++) {
+				joined[k++] = lastRawPath[i];
+			}
+			path = joined;
+			Reading prev = READINGS.peekLast();
+			if (prev != null && Math.abs(prev.distance() - distance) < 0.01) {
+				READINGS.removeLast();
 			}
 		}
-		// SkyHanni parity: anchor inline on the label itself so the opening
-		// hunt solves immediately. The base search only runs on the main
-		// thread; off-thread labels still defer to the tick thread.
-		boolean needTickSearch = true;
-		try {
-			Minecraft mc = Minecraft.getInstance();
-			if (mc != null && mc.isSameThread()) {
-				synchronized (DivanDetectorSolver.class) {
-					if (base == null) {
-						findBase(mc);
+		lastRawDist = distance;
+		lastRawPath = path;
+		READINGS.addLast(new Reading(path, distance));
+		if (READINGS.size() > MAX_READINGS) {
+			READINGS.removeFirst();
+		}
+		solve(distance);
+		if (snapped != null) {
+			PREDICTED.clear();
+			PREDICTED.add(snapped);
+		}
+	}
+
+	/**
+	 * Newest first: this frame's feet, then the last ticks' history. A
+	 * crouched tick adds the point 0.08 lower too (1.8 measuring rule), so
+	 * either rule matches.
+	 */
+	private static Vec3[] feetSnapshot(Vec3 feetNow, boolean crouchNow) {
+		List<Vec3> out = new ArrayList<>(2 * FEET.size() + 2);
+		out.add(feetNow);
+		if (crouchNow) {
+			out.add(feetNow.add(0, -SNEAK_DROP, 0));
+		}
+		var it = FEET.descendingIterator();
+		var ct = CROUCH.descendingIterator();
+		Vec3 lastRaw = feetNow;
+		boolean lastCrouch = crouchNow;
+		snapshotStill = true;
+		while (it.hasNext()) {
+			Vec3 f = it.next();
+			boolean c = ct.hasNext() && ct.next();
+			if (f.distanceToSqr(feetNow) > STILL_EPS_SQ) {
+				snapshotStill = false;
+			}
+			// Standing still repeats one point every tick: keep it once.
+			if (c == lastCrouch && f.distanceToSqr(lastRaw) < 1e-6) {
+				continue;
+			}
+			lastRaw = f;
+			lastCrouch = c;
+			out.add(f);
+			if (c) {
+				out.add(f.add(0, -SNEAK_DROP, 0));
+			}
+		}
+		return out.toArray(new Vec3[0]);
+	}
+
+	/**
+	 * Candidates consistent with every reading of the hunt. If none are, the
+	 * hunt changed under us (missed loot line): restart from the newest.
+	 */
+	private static void solve(double latestDistance) {
+		int[] scores = new int[CANDIDATES.size()];
+		int best;
+		while (true) {
+			best = 0;
+			Arrays.fill(scores, 0);
+			for (Reading r : READINGS) {
+				for (int i = 0; i < scores.length; i++) {
+					if (matches(CANDIDATES.get(i), r)) {
+						best = Math.max(best, ++scores[i]);
 					}
 				}
-				needTickSearch = false;
 			}
-		} catch (Exception ignored) {
+			// Every reading must agree. If none can, the treasure moved
+			// on (missed loot line): keep only the newest and start over.
+			if (best >= READINGS.size() || READINGS.size() <= 1) {
+				break;
+			}
+			Reading newest = READINGS.peekLast();
+			READINGS.clear();
+			READINGS.addLast(newest);
 		}
-		if (needTickSearch) {
-			wantBase = true;
+		PREDICTED.clear();
+		if (best > 0) {
+			for (int i = 0; i < scores.length; i++) {
+				if (scores[i] == best) {
+					PREDICTED.add(CANDIDATES.get(i));
+				}
+			}
+			emptyStreak = 0;
+			return;
 		}
-		solve(client);
+		// Not even the newest label fits a spot: after 3 distinct misses the
+		// anchor locked onto the wrong stairs, so drop it and search again.
+		READINGS.clear();
+		if (Double.isNaN(lastEmptyDist) || Math.abs(lastEmptyDist - latestDistance) > 0.05) {
+			lastEmptyDist = latestDistance;
+			if (++emptyStreak >= 3) {
+				rejectedBase = base;
+				setBase(null);
+			}
+		}
+	}
+
+	/** SkyHanni distance (feet to chest corner + 1y, 0.1m) from anywhere on the recent path. */
+	private static boolean matches(BlockPos cand, Reading r) {
+		return !cand.equals(ignorePos) && fitsPath(cand, r.feet(), r.distance());
+	}
+
+	/**
+	 * True when the label falls inside the range of distances the spot had
+	 * to the path. Walking steps count as continuous (the closest point on
+	 * the step), teleports only at their two ends.
+	 */
+	static boolean fitsPath(BlockPos cand, Vec3[] path, double distance) {
+		double tol = LABEL_TOL + PATH_SLACK;
+		double px = cand.getX();
+		double py = cand.getY() + 1;
+		double pz = cand.getZ();
+		double lo = distance - tol;
+		double hi = distance + tol;
+		for (int i = 0; i < path.length; i++) {
+			Vec3 a = path[i];
+			if (a == null) {
+				continue;
+			}
+			double da = Math.sqrt(sq(px - a.x) + sq(py - a.y) + sq(pz - a.z));
+			if (da >= lo && da <= hi) {
+				return true;
+			}
+			if (i + 1 >= path.length) {
+				break;
+			}
+			Vec3 b = path[i + 1];
+			if (b == null) {
+				continue;
+			}
+			double sx = b.x - a.x;
+			double sy = b.y - a.y;
+			double sz = b.z - a.z;
+			double len2 = sx * sx + sy * sy + sz * sz;
+			if (len2 > SLIDE_MAX * SLIDE_MAX || len2 < 1e-9) {
+				continue;
+			}
+			double db = Math.sqrt(sq(px - b.x) + sq(py - b.y) + sq(pz - b.z));
+			double t = Math.max(0.0, Math.min(1.0, ((px - a.x) * sx + (py - a.y) * sy + (pz - a.z) * sz) / len2));
+			double dmin = Math.sqrt(sq(px - (a.x + t * sx)) + sq(py - (a.y + t * sy)) + sq(pz - (a.z + t * sz)));
+			double dmax = Math.max(da, db);
+			if (dmin <= hi && dmax >= lo) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static double sq(double v) {
+		return v * v;
+	}
+
+	/** Candidate spots for the current anchor (empty until it is found). */
+	public static List<BlockPos> candidates() {
+		return CANDIDATES;
+	}
+
+	/** Candidate nearest to the feet within {@code maxSq}, or null. */
+	public static BlockPos nearestCandidate(Vec3 feet, double maxSq) {
+		BlockPos best = null;
+		double bestSq = maxSq;
+		for (BlockPos pos : CANDIDATES) {
+			double sq = distSq(pos, feet);
+			if (sq <= bestSq) {
+				bestSq = sq;
+				best = pos;
+			}
+		}
+		return best;
 	}
 
 	/** "You found X with your Metal Detector!" -> reset for next treasure. */
 	public static void onGameMessage(String raw) {
-		if (raw == null) {
+		if (raw == null || !TREASURE_FOUND.matcher(HollowsDetector.stripFormatting(raw)).find()) {
 			return;
 		}
-		String clean = strip(raw);
-		if (!TREASURE_FOUND.matcher(clean).find()) {
-			return;
+		long now = System.currentTimeMillis();
+		if (huntStartMs != 0L) {
+			totalHuntMs += Math.max(0L, now - huntStartMs);
 		}
-		synchronized (DivanDetectorSolver.class) {
-			long now = System.currentTimeMillis();
-			if (huntStartMs != 0L) {
-				totalHuntMs += Math.max(0L, now - huntStartMs);
-			}
-			// Chest-to-chest: the next hunt starts at this chest, so the
-			// average measures open-to-open time (not first-label-to-open).
-			huntStartMs = now;
-			treasuresFound++;
-			PREDICTED.clear();
-			playedPling = false;
-			lastFoundMs = now;
-			lastRealSpot = null;
-			// Fresh hunt: drop the old treasure's distance or harps re-solve
-			// its sphere from the new spot (flash of wrong boxes pre-label).
-			lastDistance = null;
-			lastSolvedDist = null;
-			lastSolvedPos = null;
-			lastEstFeet = null;
-			staleCount = 0;
-			emptyStreak = 0;
+		// Chest-to-chest: the next hunt starts at this chest, so the average
+		// measures open-to-open time (not first-label-to-open).
+		huntStartMs = now;
+		treasuresFound++;
+		lastFoundMs = now;
+		lastRealSpot = null;
+		Minecraft client = Minecraft.getInstance();
+		BlockPos opened = client.player == null ? null : nearestCandidate(client.player.position(), OPENED_SQ);
+		if (opened != null) {
+			ignorePos = opened;
 		}
-		try {
-			Minecraft client = Minecraft.getInstance();
-			if (client != null && client.player != null) {
-				lastPlayerBlock = client.player.blockPosition().immutable();
-			}
-		} catch (Exception ignored) {
+		// The next treasure only exists from now on, so the walk up to this
+		// chest can't be what its labels describe. Drop that history (bar a
+		// few ticks for ping) so the first reading is matched tightly.
+		while (FEET.size() > KEEP_AT_LOOT) {
+			FEET.removeFirst();
 		}
+		while (CROUCH.size() > KEEP_AT_LOOT) {
+			CROUCH.removeFirst();
+		}
+		resetHunt();
 	}
 
 	public static void tick(Minecraft client) {
 		tickCounter++;
-		if (client == null || client.player == null || client.level == null) {
+		if (client.player == null || client.level == null) {
 			return;
 		}
-		try {
-			if (!HollowsDetector.inMinesOfDivan(client)) {
-				// Fresh hunt on re-entry: drop spots after ~6s out (keep stats).
-				try {
-					synchronized (DivanDetectorSolver.class) {
-						wasInMines = false;
-					}
-				} catch (Exception ignored) {
-				}
-				if (tickCounter % 40 == 0 && ++minesOutsideStreak >= 3) {
-					clearSpots();
-					minesOutsideStreak = 0;
-				}
-				return;
+		long now = System.currentTimeMillis();
+		if (!HollowsDetector.inMinesOfDivan(client)) {
+			// Fresh hunt on re-entry: drop spots after ~6s out (keep stats).
+			wasInMines = false;
+			FEET.clear();
+			CROUCH.clear();
+			if (outsideSinceMs == 0L) {
+				outsideSinceMs = now;
+			} else if (now - outsideSinceMs > 6_000L && (!PREDICTED.isEmpty() || lastRealSpot != null)) {
+				clearSpots();
 			}
-		} catch (Exception ignored) {
 			return;
 		}
-		minesOutsideStreak = 0;
-		// Eager warm on Mines entry edge: kick off a base search attempt
-		// right away instead of waiting for the first TREASURE label.
-		// findBase() itself enforces success/fail cooldowns; main-thread only.
-		try {
-			boolean entered = false;
-			synchronized (DivanDetectorSolver.class) {
-				if (!wasInMines) {
-					wasInMines = true;
-					entered = true;
-				}
-			}
-			if (entered) {
-				try {
-					synchronized (DivanDetectorSolver.class) {
-						if (base == null) {
-							findBase(client);
-						}
-					}
-				} catch (Exception ignored) {
-				}
-			}
-		} catch (Exception ignored) {
+		outsideSinceMs = 0L;
+		Vec3 feet = client.player.position();
+		FEET.addLast(feet);
+		CROUCH.addLast(client.player.isCrouching());
+		while (FEET.size() > FEET_HISTORY) {
+			FEET.removeFirst();
 		}
-		// Track movement for pling dedupe.
-		try {
-			BlockPos cur = client.player.blockPosition().immutable();
-			synchronized (DivanDetectorSolver.class) {
-				if (!cur.equals(lastPlayerBlock)) {
-					lastPlayerBlock = cur;
-					// Allow re-notify after moving to a new spot (SkyHanni resets on move).
-					if (PREDICTED.size() != 1) {
-						playedPling = false;
-					}
-				}
-			}
-		} catch (Exception ignored) {
+		while (CROUCH.size() > FEET_HISTORY) {
+			CROUCH.removeFirst();
 		}
-		// SkyHanni parity: walked up to the single candidate — that is the
-		// opened chest. Park it in ignorePos and clear, so the next labels
-		// solve the new hunt instead of re-pointing at the old spot. The
-		// ignore releases once far away (>10m).
-		try {
-			Vec3 feetNow = client.player.position();
-			synchronized (DivanDetectorSolver.class) {
-				if (PREDICTED.size() == 1) {
-					BlockPos only = PREDICTED.get(0);
-					double dx = only.getX() + 0.5 - feetNow.x;
-					double dy = only.getY() + 0.5 - feetNow.y;
-					double dz = only.getZ() + 0.5 - feetNow.z;
-					if (dx * dx + dy * dy + dz * dz <= 25.0) {
-						ignorePos = only.immutable();
-						PREDICTED.clear();
-					}
-				} else if (PREDICTED.isEmpty() && ignorePos != null) {
-					BlockPos ig = ignorePos;
-					double dx = ig.getX() + 0.5 - feetNow.x;
-					double dy = ig.getY() + 0.5 - feetNow.y;
-					double dz = ig.getZ() + 0.5 - feetNow.z;
-					if (dx * dx + dy * dy + dz * dz > 100.0) {
-						ignorePos = null;
-					}
-				}
+		// Warm the anchor on entry so the first label solves instantly;
+		// findBase() keeps failures on a cooldown while chunks stream in.
+		if (!wasInMines || base == null) {
+			wasInMines = true;
+			if (base == null) {
+				findBase(client);
 			}
-		} catch (Exception ignored) {
 		}
-		// Heavy base anchor search lives here (tick), never on packet thread.
-		// Prefetch even without detector held so frame-1 actionbar solves instantly.
-		try {
-			synchronized (DivanDetectorSolver.class) {
-				if (base == null || wantBase) {
-					wantBase = false;
-					findBase(client);
-				}
-			}
-		} catch (Exception ignored) {
+		// The waypoint stays until the loot line says it was opened (that
+		// parks it in ignorePos); walking close no longer clears it.
+		if (PREDICTED.isEmpty() && ignorePos != null && distSq(ignorePos, feet) > 100.0) {
+			ignorePos = null;
 		}
-		// Max speed: re-solve while walking between server updates. Labels are
-		// 1Hz and far-away harps are rare, but the last known distance applied
-		// to fresh feet every 250ms of movement narrows the set continuously.
+		if (tickCounter % 2 == 0) {
+			nearChestSnap(client, feet);
+		}
 		if (tickCounter % 5 == 0) {
-			continuousSolve(client);
+			chestSnap(client);
 		}
-		// No proximity auto-clear by design: the waypoint stays until the
-		// loot chat confirms the dig. A stale single self-heals via the
-		// label-mismatch escape in onActionBar.
+		refreshVisible(feet);
 	}
 
 	/**
-	 * Tick-driven narrowing: applies the last known label distance to the
-	 * live feet position. No new info per call, but walking reshapes the
-	 * geometry, so the set shrinks every 250ms of movement instead of only
-	 * on 1Hz labels or harps.
+	 * A chest block within 5m is the treasure (it only appears once you're
+	 * close), whether or not the readings agree: point there now. The
+	 * opened one is skipped; if the chest goes away without a loot line the
+	 * snap is dropped and the readings take over again.
 	 */
-	private static void continuousSolve(Minecraft client) {
-		try {
-			if (client == null || client.player == null || !isHoldingDetector(client)) {
-				return;
-			}
-			Double ld;
-			synchronized (DivanDetectorSolver.class) {
-				ld = lastDistance;
-				if (ld == null || PREDICTED.size() == 1) {
-					return;
-				}
-			}
-			Vec3 feetNow;
-			try {
-				feetNow = client.player.position();
-			} catch (Exception ignored) {
-				return;
-			}
-			synchronized (DivanDetectorSolver.class) {
-				if (lastEstFeet != null && lastEstFeet.distanceToSqr(feetNow) < 0.09) {
-					return;
-				}
-			}
-			solve(client);
-		} catch (Exception ignored) {
-		}
-	}
-
-	private static void solve(Minecraft client) {		Double distance;
-		synchronized (DivanDetectorSolver.class) {
-			distance = lastDistance;
-		}
-		if (distance == null) {
+	private static void nearChestSnap(Minecraft client, Vec3 feet) {
+		if (base == null) {
 			return;
 		}
-		List<BlockPos> matches = candidatesAt(client, distance, 0.05);
-		if (matches == null) {
+		if (snapped != null) {
+			if (client.level.isLoaded(snapped) && !isChest(client.level.getBlockState(snapped))) {
+				snapped = null;
+				PREDICTED.clear();
+				solveQuiet();
+			}
 			return;
 		}
-		BlockPos curBlock;
-		Vec3 solveFeet = null;
-		try {
-			curBlock = client.player.blockPosition().immutable();
-		} catch (Exception ignored) {
-			curBlock = null;
+		BlockPos center = BlockPos.containing(feet);
+		BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
+		BlockPos best = null;
+		double bestSq = SNAP_SQ;
+		for (int ox = -6; ox <= 6; ox++) {
+			for (int oy = -6; oy <= 6; oy++) {
+				for (int oz = -6; oz <= 6; oz++) {
+					p.set(center.getX() + ox, center.getY() + oy, center.getZ() + oz);
+					double sq = distSq(p, feet);
+					if (sq > bestSq || p.equals(ignorePos) || !client.level.isLoaded(p)
+						|| !isChest(client.level.getBlockState(p))) {
+						continue;
+					}
+					bestSq = sq;
+					best = p.immutable();
+				}
+			}
 		}
-		try {
-			solveFeet = client.player.position();
-		} catch (Exception ignored) {
-		}
-		synchronized (DivanDetectorSolver.class) {
-			int before = PREDICTED.size();
-			// Narrow, never pop: intersect with the live set when that keeps
-			// something (true chest matches every reading), else take the new
-			// set (new hunt, or stale set healed). Boxes only ever disappear.
-			List<BlockPos> inter = new ArrayList<>(PREDICTED);
-			inter.retainAll(matches);
-			List<BlockPos> narrowed = !PREDICTED.isEmpty() && !inter.isEmpty() ? inter : matches;
+		if (best != null) {
+			snapped = best;
 			PREDICTED.clear();
-			PREDICTED.addAll(narrowed);
-			lastSolveMs = System.currentTimeMillis();
-			lastSolvedDist = distance;
-			lastSolvedPos = curBlock;
-			if (solveFeet != null) {
-				lastEstFeet = solveFeet;
-			}
-			// Wrong base self-heal: repeated distinct empty solves mean the
-			// anchor locked onto the wrong stairs - drop it and re-search.
-			if (narrowed.isEmpty()) {
-				boolean distinct = Double.isNaN(lastEmptyDist)
-					|| Math.abs(lastEmptyDist - distance) > 0.05
-					|| (lastEmptyPos != null && !lastEmptyPos.equals(curBlock));
-				if (distinct) {
-					lastEmptyDist = distance;
-					lastEmptyPos = curBlock;
-					if (++emptyStreak >= 3) {
-						base = null;
-						lastBaseSearchMs = 0L;
-						emptyStreak = 0;
-					}
-				}
-			} else {
-				emptyStreak = 0;
-			}
-			// Only notify on transition to single - never spam 0/N.
-			// (No coords chat: the waypoint + pling carry it.)
-			if (PREDICTED.size() == 1 && (before != 1 || !playedPling)) {
-				playedPling = true;
-			} else if (PREDICTED.size() != 1) {
-				playedPling = false;
-			}
-			try {
-				if (client.player != null) {
-					lastPlayerBlock = client.player.blockPosition().immutable();
-				}
-			} catch (Exception ignored) {
+			PREDICTED.add(best);
+		}
+	}
+
+	/** Re-derive PREDICTED from the readings already held (no new label). */
+	private static void solveQuiet() {
+		if (!READINGS.isEmpty()) {
+			solve(READINGS.peekLast().distance());
+		}
+	}
+
+	/** A real chest block on a candidate spot is the treasure: collapse to it. */
+	private static void chestSnap(Minecraft client) {
+		if (PREDICTED.size() <= 1) {
+			return;
+		}
+		for (BlockPos pos : PREDICTED) {
+			if (client.level.isLoaded(pos) && isChest(client.level.getBlockState(pos))) {
+				PREDICTED.clear();
+				PREDICTED.add(pos);
+				return;
 			}
 		}
 	}
 
 	/**
-	 * Near-player waypoint gate: a predicted spot within 5m of the player
-	 * renders only while a real chest block is equally close (loaded chunks
-	 * only — unloaded chunks can't prove absence, so they allow). Anything
-	 * further out always renders.
+	 * What renders: every possible spot, but only once the shortlist is down
+	 * to {@link #MAX_SHOWN} or fewer.
 	 */
-	public static boolean nearWaypointAllowed(Minecraft client, BlockPos pos) {
-		try {
-			if (client == null || client.player == null || client.level == null || pos == null) {
-				return true;
+	private static void refreshVisible(Vec3 feet) {
+		VISIBLE.clear();
+		if (PREDICTED.size() > MAX_SHOWN) {
+			return;
+		}
+		BlockPos nearest = null;
+		double nearestSq = Double.MAX_VALUE;
+		for (BlockPos pos : PREDICTED) {
+			double sq = distSq(pos, feet);
+			VISIBLE.add(pos);
+			if (sq < nearestSq) {
+				nearestSq = sq;
+				nearest = pos;
 			}
-			Vec3 feet = client.player.position();
-			double dx = pos.getX() + 0.5 - feet.x;
-			double dy = pos.getY() + 0.5 - feet.y;
-			double dz = pos.getZ() + 0.5 - feet.z;
-			if (dx * dx + dy * dy + dz * dz > 25.0) {
-				return true;
-			}
-			BlockPos base = client.player.blockPosition();
-			for (int ox = -5; ox <= 5; ox++) {
-				for (int oy = -5; oy <= 5; oy++) {
-					for (int oz = -5; oz <= 5; oz++) {
-						BlockPos p;
-						try {
-							p = base.offset(ox, oy, oz);
-							if (!client.level.isLoaded(p)) {
-								return true;
-							}
-						} catch (Exception ignored) {
-							return true;
-						}
-						boolean chest;
-						try {
-							var st = client.level.getBlockState(p);
-							chest = st.is(Blocks.CHEST) || st.is(Blocks.TRAPPED_CHEST);
-						} catch (Exception ignored) {
-							continue;
-						}
-						if (chest) {
-							double cx = p.getX() + 0.5 - feet.x;
-							double cy = p.getY() + 0.5 - feet.y;
-							double cz = p.getZ() + 0.5 - feet.z;
-							if (cx * cx + cy * cy + cz * cz <= 25.0) {
-								return true;
-							}
-						}
-					}
-				}
-			}
-			return false;
-		} catch (Exception ignored) {
-			return true;
+		}
+		if (nearest != null) {
+			lastRealSpot = nearest;
 		}
 	}
 
-	/**
-	 * All known offsets whose SkyHanni-exact distance (feet to chest+1y,
-	 * rounded to 0.1m) is within tolerance of the target. Null when the world
-	 * or base anchor isn't ready (base search stays in tick).
-	 */
-	private static List<BlockPos> candidatesAt(Minecraft client, double target, double tol) {
-		if (client == null || client.player == null || client.level == null) {
-			return null;
-		}
-		// Suppress right after loot.
-		if (System.currentTimeMillis() - lastFoundMs < 500L) {
-			return null;
-		}
-		BlockPos anchor;
-		synchronized (DivanDetectorSolver.class) {
-			anchor = base;
-		}
-		if (anchor == null) {
-			return null;
-		}
-		Vec3 feet;
-		try {
-			feet = client.player.position();
-		} catch (Exception ignored) {
-			return null;
-		}
-		List<BlockPos> matches = new ArrayList<>();
-		for (int[] o : OFFSETS) {
-			BlockPos cand;
-			try {
-				cand = new BlockPos(anchor.getX() - o[0], anchor.getY() - o[1], anchor.getZ() - o[2]);
-			} catch (Exception ignored) {
-				continue;
+	private static boolean isChest(BlockState st) {
+		return st.is(Blocks.CHEST) || st.is(Blocks.TRAPPED_CHEST);
+	}
+
+	private static double distSq(BlockPos pos, Vec3 feet) {
+		double dx = pos.getX() + 0.5 - feet.x;
+		double dy = pos.getY() + 0.5 - feet.y;
+		double dz = pos.getZ() + 0.5 - feet.z;
+		return dx * dx + dy * dy + dz * dz;
+	}
+
+	private static void setBase(BlockPos anchor) {
+		base = anchor;
+		CANDIDATES.clear();
+		if (anchor != null) {
+			for (int[] o : OFFSETS) {
+				CANDIDATES.add(new BlockPos(anchor.getX() - o[0], anchor.getY() - o[1], anchor.getZ() - o[2]));
 			}
-			// Walked-up spot: solved once, looted (or standing on) it — skip
-			// it in future solves until far away (tick expiry below).
-			synchronized (DivanDetectorSolver.class) {
-				if (cand.equals(ignorePos)) {
+		}
+		lastBaseSearchMs = 0L;
+		resetHunt();
+	}
+
+	/**
+	 * Jade-crystal barrier anchor: quartz stairs with barrier 13 above, walk
+	 * to max. Searches ±50 x/z, ±30 y around the player, but only inside
+	 * chunk sections whose palette can hold quartz stairs.
+	 */
+	private static void findBase(Minecraft client) {
+		long now = System.currentTimeMillis();
+		if (now - lastBaseSearchMs < BASE_FAIL_COOLDOWN_MS) {
+			return;
+		}
+		lastBaseSearchMs = now;
+		var level = client.level;
+		BlockPos player = client.player.blockPosition();
+		int minX = player.getX() - 50;
+		int maxX = player.getX() + 49;
+		int minY = player.getY() - 30;
+		int maxY = player.getY() + 30;
+		int minZ = player.getZ() - 50;
+		int maxZ = player.getZ() + 49;
+		BlockPos.MutableBlockPos above = new BlockPos.MutableBlockPos();
+		for (int cx = minX >> 4; cx <= maxX >> 4; cx++) {
+			for (int cz = minZ >> 4; cz <= maxZ >> 4; cz++) {
+				LevelChunk chunk = level.getChunkSource().getChunk(cx, cz, false);
+				if (chunk == null) {
 					continue;
 				}
-			}
-			double d;
-			try {
-				double dx = (double) cand.getX() - feet.x;
-				double dy = (double) (cand.getY() + 1) - feet.y;
-				double dz = (double) cand.getZ() - feet.z;
-				d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-			} catch (Exception ignored) {
-				continue;
-			}
-			double rounded = Math.round(d * 10.0) / 10.0;
-			if (Math.abs(rounded - target) <= tol) {
-				matches.add(cand.immutable());
-			}
-		}
-		return matches;
-	}
-
-	/** Jade-crystal barrier anchor: quartz stairs with barrier 13 above, walk to max. */
-	private static BlockPos findBase(Minecraft client) {
-		long now = System.currentTimeMillis();
-		synchronized (DivanDetectorSolver.class) {
-			// Decoupled throttle: cache success long (60s), retry failures
-			// fast (2s) so chunk streaming isn't punished with a blackout.
-			// Timestamp is set AFTER the search, never before.
-			long cooldown = base != null ? BASE_SUCCESS_COOLDOWN_MS : BASE_FAIL_COOLDOWN_MS;
-			if (now - lastBaseSearchMs < cooldown) {
-				return base;
-			}
-		}
-		BlockPos player;
-		try {
-			player = client.player.blockPosition().immutable();
-		} catch (Exception ignored) {
-			try {
-				synchronized (DivanDetectorSolver.class) {
-					lastBaseSearchMs = System.currentTimeMillis();
-				}
-			} catch (Exception ignored2) {
-			}
-			return null;
-		}
-		try {
-			for (int dx = -50; dx < 50; dx++) {
-				for (int dy = 30; dy >= -30; dy--) {
-					for (int dz = -50; dz < 50; dz++) {
-						BlockPos p;
-						try {
-							p = player.offset(dx, dy, dz);
-							if (!client.level.isLoaded(p)) {
-								continue;
+				LevelChunkSection[] sections = chunk.getSections();
+				for (int sy = minY >> 4; sy <= maxY >> 4; sy++) {
+					int idx = chunk.getSectionIndexFromSectionY(sy);
+					if (idx < 0 || idx >= sections.length) {
+						continue;
+					}
+					LevelChunkSection section = sections[idx];
+					if (section == null || section.hasOnlyAir()
+						|| !section.maybeHas(s -> s.is(Blocks.QUARTZ_STAIRS))) {
+						continue;
+					}
+					int y0 = Math.max(minY, sy << 4);
+					int y1 = Math.min(maxY, (sy << 4) + 15);
+					int x0 = Math.max(minX, cx << 4);
+					int x1 = Math.min(maxX, (cx << 4) + 15);
+					int z0 = Math.max(minZ, cz << 4);
+					int z1 = Math.min(maxZ, (cz << 4) + 15);
+					for (int y = y0; y <= y1; y++) {
+						for (int x = x0; x <= x1; x++) {
+							for (int z = z0; z <= z1; z++) {
+								if (!section.getBlockState(x & 15, y & 15, z & 15).is(Blocks.QUARTZ_STAIRS)) {
+									continue;
+								}
+								above.set(x, y + 13, z);
+								if (!level.isLoaded(above) || !level.getBlockState(above).is(Blocks.BARRIER)) {
+									continue;
+								}
+								BlockPos anchor = walkToMax(client, above.immutable());
+								if (!anchor.equals(rejectedBase)) {
+									setBase(anchor);
+									return;
+								}
 							}
-							if (!client.level.getBlockState(p).is(Blocks.QUARTZ_STAIRS)) {
-								continue;
-							}
-							BlockPos above13 = p.offset(0, 13, 0);
-							if (!client.level.isLoaded(above13)) {
-								continue;
-							}
-							if (!client.level.getBlockState(above13).is(Blocks.BARRIER)) {
-								continue;
-							}
-							BlockPos anchor = walkToMax(client, above13.immutable());
-							synchronized (DivanDetectorSolver.class) {
-								base = anchor;
-								lastBaseSearchMs = System.currentTimeMillis();
-							}
-							return anchor;
-						} catch (Exception ignored) {
 						}
 					}
 				}
 			}
-		} catch (Exception ignored) {
 		}
-		try {
-			synchronized (DivanDetectorSolver.class) {
-				lastBaseSearchMs = System.currentTimeMillis();
-			}
-		} catch (Exception ignored) {
-		}
-		return null;
 	}
 
+	/** Steps +x, then +y, then +z along barriers until none moves. */
 	private static BlockPos walkToMax(Minecraft client, BlockPos start) {
 		BlockPos cur = start;
-		try {
-			boolean changed = true;
-			while (changed) {
-				changed = false;
-				BlockPos nx = cur.offset(1, 0, 0);
-				if (client.level.isLoaded(nx) && client.level.getBlockState(nx).is(Blocks.BARRIER)) {
-					cur = nx.immutable();
-					changed = true;
-				}
-				BlockPos ny = cur.offset(0, 1, 0);
-				if (client.level.isLoaded(ny) && client.level.getBlockState(ny).is(Blocks.BARRIER)) {
-					cur = ny.immutable();
-					changed = true;
-				}
-				BlockPos nz = cur.offset(0, 0, 1);
-				if (client.level.isLoaded(nz) && client.level.getBlockState(nz).is(Blocks.BARRIER)) {
-					cur = nz.immutable();
+		boolean changed = true;
+		while (changed) {
+			changed = false;
+			for (Direction dir : WALK) {
+				BlockPos next = cur.relative(dir);
+				if (client.level.isLoaded(next) && client.level.getBlockState(next).is(Blocks.BARRIER)) {
+					cur = next;
 					changed = true;
 				}
 			}
-		} catch (Exception ignored) {
 		}
-		return cur.immutable();
+		return cur;
 	}
+
+	private static final Direction[] WALK = { Direction.EAST, Direction.UP, Direction.SOUTH };
 }

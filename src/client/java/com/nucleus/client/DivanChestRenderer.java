@@ -34,16 +34,14 @@ public final class DivanChestRenderer {
 		if (!NucleusMod.CONFIG.divanChestEnabled) {
 			return;
 		}
-		if (!HollowsDetector.isInCrystalHollows()) {
-			return;
-		}
 		if (!HollowsDetector.inMinesOfDivan(client)) {
 			return;
 		}
 		if (JackpotAnimation.cinematicActive()) {
 			return;
 		}
-		if (!DivanDetectorSolver.hasPredicted() && DivanDetectorSolver.lastRealSpot() == null) {
+		java.util.List<BlockPos> allowed = DivanDetectorSolver.visibleSpots();
+		if (allowed.isEmpty() && DivanDetectorSolver.lastRealSpot() == null) {
 			return;
 		}
 		boolean text = NucleusMod.CONFIG.divanChestText;
@@ -71,17 +69,8 @@ public final class DivanChestRenderer {
 				camPos.z + fwd.z() * 2.0);
 		} catch (Exception ignored) {
 		}
-		var predicted = DivanDetectorSolver.snapshotPredicted();
-		java.util.List<BlockPos> allowed = new java.util.ArrayList<>();
-		for (var pos : predicted) {
-			// No chest within 5m of you: near waypoints are fake (a ghost
-			// marker below remembers the last real one instead).
-			if (!DivanDetectorSolver.nearWaypointAllowed(client, pos)) {
-				continue;
-			}
-			allowed.add(pos);
-			DivanDetectorSolver.noteRealSpot(pos);
-		}
+		// Near waypoints without a real chest close by are already filtered
+		// out (the ghost marker below remembers the last real one instead).
 		if (!allowed.isEmpty()) {
 			// Primary = nearest: full box + tracer + text. The rest render
 			// dimmed (box only, tracer only within 5m) so a wide set stays
@@ -95,8 +84,8 @@ public final class DivanChestRenderer {
 					primary = pos;
 				}
 			}
-			int dimOutline = dimRgb(color, 0.35f);
-			int dimFill = (0x22 << 24) | (dimRgb(color, 0.35f) & 0x00FFFFFF);
+			int dimOutline = MadoBrickWaypointRenderer.dimColor(color, 0.35f);
+			int dimFill = (0x22 << 24) | (MadoBrickWaypointRenderer.dimColor(color, 0.35f) & 0x00FFFFFF);
 			for (BlockPos pos : allowed) {
 				try {
 					Vec3 center = Vec3.atCenterOf(pos);
@@ -165,8 +154,8 @@ public final class DivanChestRenderer {
 			BlockPos ghost = DivanDetectorSolver.lastRealSpot();
 			if (ghost != null) {
 				try {
-					int dimOutline = dimRgb(color, 0.35f);
-					int dimFill = (0x22 << 24) | (dimRgb(color, 0.35f) & 0x00FFFFFF);
+					int dimOutline = MadoBrickWaypointRenderer.dimColor(color, 0.35f);
+					int dimFill = (0x22 << 24) | (MadoBrickWaypointRenderer.dimColor(color, 0.35f) & 0x00FFFFFF);
 					AABB box = new AABB(ghost).inflate(0.02);
 					Gizmos.cuboid(box, GizmoStyle.strokeAndFill(dimOutline, outlineWidth, dimFill)).setAlwaysOnTop();
 					Vec3 gc = Vec3.atCenterOf(ghost);
@@ -180,14 +169,5 @@ public final class DivanChestRenderer {
 				}
 			}
 		}
-	}
-
-	/** Scales RGB, keeps alpha. */
-	private static int dimRgb(int argb, float f) {
-		int a = (argb >>> 24) & 0xFF;
-		int r = (int) (((argb >> 16) & 0xFF) * f);
-		int g = (int) (((argb >> 8) & 0xFF) * f);
-		int b = (int) ((argb & 0xFF) * f);
-		return (a << 24) | (r << 16) | (g << 8) | b;
 	}
 }

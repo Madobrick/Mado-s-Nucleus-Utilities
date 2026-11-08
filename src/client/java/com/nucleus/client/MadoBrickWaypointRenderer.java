@@ -101,17 +101,17 @@ public final class MadoBrickWaypointRenderer {
 					}
 				}
 				ordered.sort(java.util.Comparator.comparingInt(MadoBrickWaypoints.Waypoint::index));
-			for (int i = 0; i + 1 < ordered.size(); i++) {
-				var a = ordered.get(i);
-				var b = ordered.get(i + 1);
-				int color = MadoBrickWaypoints.colorFor(a.index());
-				if (NucleusMod.CONFIG.waypointDimBeyondEtherwarp
-					&& eye.distanceTo(Vec3.atCenterOf(a.pos())) > 61.0
-					&& eye.distanceTo(Vec3.atCenterOf(b.pos())) > 61.0) {
-					color = dimColor(color, 0.35f);
-				}
-				var lineProps = Gizmos.line(
-					Vec3.atCenterOf(a.pos()), Vec3.atCenterOf(b.pos()), color);
+				for (int i = 0; i + 1 < ordered.size(); i++) {
+					var a = ordered.get(i);
+					var b = ordered.get(i + 1);
+					int color = MadoBrickWaypoints.colorFor(a.index());
+					if (NucleusMod.CONFIG.waypointDimBeyondEtherwarp
+						&& eye.distanceTo(Vec3.atCenterOf(a.pos())) > 61.0
+						&& eye.distanceTo(Vec3.atCenterOf(b.pos())) > 61.0) {
+						color = dimColor(color, 0.35f);
+					}
+					var lineProps = Gizmos.line(
+						Vec3.atCenterOf(a.pos()), Vec3.atCenterOf(b.pos()), color);
 					if (throughWalls) {
 						lineProps.setAlwaysOnTop();
 					}
@@ -127,7 +127,7 @@ public final class MadoBrickWaypointRenderer {
 	}
 
 	/** Keeps alpha, scales RGB (for out-of-etherwarp-range dimming). */
-	private static int dimColor(int argb, float f) {
+	static int dimColor(int argb, float f) {
 		int a = (argb >>> 24) & 0xFF;
 		int r = (int) (((argb >> 16) & 0xFF) * f);
 		int g = (int) (((argb >> 8) & 0xFF) * f);

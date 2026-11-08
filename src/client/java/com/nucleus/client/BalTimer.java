@@ -75,6 +75,11 @@ public final class BalTimer {
 		NucleusMod.LOGGER.info("Bal timer started (60s)");
 	}
 
+	/** When the last Bal death started the timer (0 = none this lobby). */
+	public static synchronized long lastStartAt() {
+		return lastStartAt;
+	}
+
 	public static synchronized boolean isRunning() {
 		return running;
 	}

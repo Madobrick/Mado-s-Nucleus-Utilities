@@ -12,9 +12,9 @@ import com.nucleus.NucleusMod;
 
 /**
  * Important-mob discovery: the first time a watched NPC (Yolkar, Professor
- * Robot, the four Keepers, Door Guardian) is seen, a player-sized box
- * (0.6 x 1.8) is stored permanently at its feet and filled from then on —
- * even when the mob itself is unloaded. Markers clear on lobby switch.
+ * Robot, the four Keepers, both Door Guardians) is seen, a player-sized box
+ * (0.6 x 1.8) is stored at its feet and filled from then on — even when the
+ * mob itself is unloaded. Markers clear on lobby switch.
  *
  * <p>Hypixel rarely puts the name on the NPC body itself: nameplates usually
  * come from hologram armor stands at the NPC's spot or scoreboard-team
@@ -22,7 +22,7 @@ import com.nucleus.NucleusMod;
  * and its display name, and a 1s sweep re-scans all loaded entities (catches
  * NPCs that were already around before the toggle was flipped, plus anything
  * the load event missed). Each marker records exactly once — never rewritten,
- * so boxes can't drift or vanish.
+ * so boxes can't drift or vanish — and the sweep stops once all are found.
  */
 public final class MobHighlight {
 	private MobHighlight() {
@@ -48,7 +48,14 @@ public final class MobHighlight {
 	private static int tickCounter = 0;
 
 	public static void onEntityLoad(Entity entity, Level level) {
-		tryRecord(entity);
+		if (watching()) {
+			tryRecord(entity);
+		}
+	}
+
+	private static boolean watching() {
+		return NucleusMod.CONFIG.mobHighlightEnabled && HollowsDetector.isInCrystalHollows()
+			&& !MobMarkers.complete();
 	}
 
 	/**
@@ -57,13 +64,10 @@ public final class MobHighlight {
 	 * missed. Cheap enough to run forever (one pass per second).
 	 */
 	public static void tick(Minecraft client) {
-		if (tickCounter++ % 20 != 0) {
+		if (tickCounter++ % 20 != 0 || !watching()) {
 			return;
 		}
-		if (!NucleusMod.CONFIG.mobHighlightEnabled) {
-			return;
-		}
-		if (client == null || client.level == null || client.player == null) {
+		if (client.level == null || client.player == null) {
 			return;
 		}
 		try {
@@ -79,10 +83,7 @@ public final class MobHighlight {
 
 	private static void tryRecord(Entity entity) {
 		try {
-			if (entity == null || !NucleusMod.CONFIG.mobHighlightEnabled) {
-				return;
-			}
-			if (entity instanceof AbstractClientPlayer) {
+			if (entity == null || entity instanceof AbstractClientPlayer) {
 				return;
 			}
 			String hay = namesOf(entity);
@@ -95,11 +96,9 @@ public final class MobHighlight {
 				if (!MobMarkers.has("door_1")) {
 					record("door_1", entity);
 				} else if (!MobMarkers.has("door_2")) {
-					var d1 = MobMarkers.snapshot().get("door_1");
+					Vec3 c = MobMarkers.get("door_1").getCenter();
 					Vec3 p = entity.position();
-					if (d1 == null || !d1.hasBox
-						|| (p.x - (d1.x0 + d1.x1) / 2.0) * (p.x - (d1.x0 + d1.x1) / 2.0)
-						+ (p.z - (d1.z0 + d1.z1) / 2.0) * (p.z - (d1.z0 + d1.z1) / 2.0) > 16.0) {
+					if ((p.x - c.x) * (p.x - c.x) + (p.z - c.z) * (p.z - c.z) > 16.0) {
 						record("door_2", entity);
 					}
 				}
@@ -115,12 +114,10 @@ public final class MobHighlight {
 			if (hit == null) {
 				return;
 			}
-			var cur = MobMarkers.snapshot().get(hit.id());
-			if (cur != null && cur.hasBox) {
-				// Recorded once, never rewritten: exact markers are final.
-				return;
+			// Recorded once, never rewritten: exact markers are final.
+			if (!MobMarkers.has(hit.id())) {
+				record(hit.id(), entity);
 			}
-			record(hit.id(), entity);
 		} catch (Exception ignored) {
 		}
 	}
@@ -130,13 +127,13 @@ public final class MobHighlight {
 		AABB box = new AABB(
 			feet.x - BOX_W / 2.0, feet.y, feet.z - BOX_W / 2.0,
 			feet.x + BOX_W / 2.0, feet.y + BOX_H, feet.z + BOX_W / 2.0);
-		MobMarkers.put(id, new MobMarkers.Marker(box));
+		MobMarkers.put(id, box);
 		NucleusMod.LOGGER.info("Mob marker recorded: {} at {} ({})",
 			id, box, entity.getClass().getSimpleName());
 	}
 
-	/** Custom name + display name (team formatting included), cleaned for matching. */
-	private static String namesOf(Entity entity) {
+	/** Custom name + display name (team formatting included), cleaned for matching. Shared NPC matcher. */
+	static String namesOf(Entity entity) {
 		StringBuilder hay = new StringBuilder();
 		try {
 			if (entity.getCustomName() != null) {

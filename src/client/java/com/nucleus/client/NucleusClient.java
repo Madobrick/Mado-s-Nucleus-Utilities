@@ -3,7 +3,8 @@ package com.nucleus.client;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientEntityEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
@@ -22,23 +23,7 @@ public class NucleusClient implements ClientModInitializer {
 
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
 			SkyBlockDetector.reset();
-			HollowsDetector.reset();
-			LobbyDay.reset();
-			MadoBrickWaypoints.clear();
-			MadoBrickIslandWatcher.onLeave();
-			JackpotDetector.reset();
-			JackpotAnimation.stop();
-			BalTimer.reset();
-			BalWatch.resetLobby();
-			SpeedrunManager.onLeave();
-			Scavenger.onLeave();
-			PetAlert.resetLobby();
-			CrystalTracker.reset();
-			MobMarkers.clear();
-			NpcTradeWatch.reset();
-			DyeCelebration.reset();
-			DivanDetectorSolver.onLeave();
-			RngdleGame.onLeave();
+			resetLobbyState();
 			if (NucleusMod.CONFIG.safeMode) {
 				NucleusMod.CONFIG.safeMode = false;
 				NucleusMod.CONFIG.save();
@@ -47,27 +32,13 @@ public class NucleusClient implements ClientModInitializer {
 			}
 		});
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
-			MadoBrickWaypoints.clear();
-			MadoBrickIslandWatcher.onLeave();
-			HollowsDetector.reset();
-			LobbyDay.reset();
-			JackpotDetector.reset();
-			JackpotAnimation.stop();
-			BalTimer.reset();
-			BalWatch.resetLobby();
-			SpeedrunManager.onLeave();
-			Scavenger.onLeave();
-			PetAlert.resetLobby();
-			CrystalTracker.reset();
-			MobMarkers.clear();
-			NpcTradeWatch.reset();
-			DyeCelebration.reset();
-			DivanDetectorSolver.onLeave();
-			RngdleGame.onLeave();
+			resetLobbyState();
 			if (NucleusMod.CONFIG.safeMode) {
 				NucleusMod.CONFIG.safeMode = false;
 				NucleusMod.CONFIG.save();
 			}
+			// Warm the jackpot roll-up prices (background, at most every 10 min).
+			DropPrices.refreshIfStale();
 		});
 
 		ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
@@ -76,8 +47,6 @@ public class NucleusClient implements ClientModInitializer {
 			}
 			dispatchGameMessage(message.getString());
 		});
-
-
 
 		UseEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
 			try {
@@ -117,18 +86,17 @@ public class NucleusClient implements ClientModInitializer {
 			} catch (Exception ignored) {
 			}
 		});
-		MobMarkers.load();
 		Achievements.migrateOldAchievements();
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "bal-timer"), BalTimerHud.INSTANCE);
-		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "bal-state"), BalStateHud.INSTANCE);
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "jackpot"), JackpotHud.INSTANCE);
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "speedrun"), SpeedrunHud.INSTANCE);
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "lobby-day"), LobbyDayHud.INSTANCE);
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "scavenger"), ScavengerHud.INSTANCE);
-		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "divan-chest"), DivanChestHud.INSTANCE);
+		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "terror-stacks"), TerrorStacksHud.INSTANCE);
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "rngdle"), RngdleHud.INSTANCE);
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "alerts"), AlertHud.INSTANCE);
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "dye"), DyeHud.INSTANCE);
+		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "bal-pet"), BalPetDrop.INSTANCE);
 
 		MadoBrickWaypointRenderer.register();
 		HideBundleBox.register();
@@ -136,6 +104,28 @@ public class NucleusClient implements ClientModInitializer {
 		DivanChestRenderer.register();
 
 		MadoBrickCommands.register();
+	}
+
+	/** Per-lobby state: wiped on both join and disconnect. */
+	private static void resetLobbyState() {
+		HollowsDetector.reset();
+		LobbyDay.reset();
+		MadoBrickWaypoints.clear();
+		MadoBrickIslandWatcher.onLeave();
+		JackpotDetector.reset();
+		JackpotAnimation.stop();
+		TerrorStacks.reset();
+		BalTimer.reset();
+		BalWatch.resetLobby();
+		SpeedrunManager.onLeave();
+		Scavenger.onLeave();
+		PetAlert.resetLobby();
+		CrystalTracker.reset();
+		MobMarkers.clear();
+		NpcTradeWatch.reset();
+		DyeCelebration.reset();
+		DivanDetectorSolver.onLeave();
+		RngdleGame.onLeave();
 	}
 
 	/**
@@ -162,6 +152,8 @@ public class NucleusClient implements ClientModInitializer {
 		// One guard per handler: a failure in one (say the speedrun split)
 		// must never swallow the others (the objective sounds after it).
 		guarded("BalTimer", () -> BalTimer.onGameMessage(text));
+		guarded("BalWatch", () -> BalWatch.onGameMessage(text));
+		guarded("BadLobbyAlert", () -> BadLobbyAlert.onGameMessage(text));
 		guarded("JackpotDetector", () -> JackpotDetector.onGameMessage(text));
 		guarded("SpeedrunManager", () -> SpeedrunManager.onGameMessage(text));
 		guarded("Achievements", () -> Achievements.onGameMessage(text));
@@ -169,7 +161,6 @@ public class NucleusClient implements ClientModInitializer {
 		guarded("ObjectiveSounds", () -> ObjectiveSounds.onGameMessage(text));
 		guarded("DivanDetectorSolver", () -> DivanDetectorSolver.onGameMessage(text));
 		guarded("PetAlert", () -> PetAlert.onGameMessage(text));
-		guarded("BalWatch", () -> BalWatch.onGameMessage(text));
 	}
 
 	private static void guarded(String name, Runnable handler) {
@@ -184,6 +175,7 @@ public class NucleusClient implements ClientModInitializer {
 		SkyBlockDetector.tick(client);
 		HollowsDetector.tick(client);
 		LobbyDay.tick(client);
+		BadLobbyAlert.tick(client);
 		MadoBrickKeybinds.tick(client);
 		MadoBrickIslandWatcher.tick(client);
 		BalTimer.tick(client);

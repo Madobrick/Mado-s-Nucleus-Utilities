@@ -2,6 +2,7 @@ package com.nucleus.client;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -16,7 +17,7 @@ import com.nucleus.SpeedrunStore;
 
 /**
  * One move screen for every HUD element (Bal, speedrun, lobby day,
- * scavenger, alerts). Drag a preview to move it, scroll over one to resize
+ * scavenger, RNGdle, alerts). Drag a preview to move it, scroll over one to resize
  * it (0.5x-3.0x); the hovered element gets an outline. The gambling
  * animation is intentionally not here.
  */
@@ -35,10 +36,10 @@ public class MoveHudScreen extends Screen {
 		int x;
 		int y;
 		float scale;
-		final Runnable commit;
+		final Consumer<Entry> commit;
 
 		Entry(String name, String[] lines, int[] colors, float[] lineScales,
-			int x, int y, float scale, Runnable commit) {
+			int x, int y, float scale, Consumer<Entry> commit) {
 			this.name = name;
 			this.lines = lines;
 			this.colors = colors;
@@ -81,24 +82,27 @@ public class MoveHudScreen extends Screen {
 	protected void init() {
 		entries.clear();
 		grabbed = null;
-		entries.add(new Entry("Bal timer",
-			new String[] { BalTimer.displayString() },
-			new int[] { BalTimer.displayColor() },
-			HudText.ones(1),
+		String[] balLines = BalTimerHud.lines();
+		int[] balColors = BalTimerHud.colors();
+		if (balLines.length == 0) {
+			balLines = new String[] { BalTimer.displayString() };
+			balColors = new int[] { BalTimer.displayColor() };
+		}
+		entries.add(new Entry("Bal timer", balLines, balColors, HudText.ones(balLines.length),
 			NucleusMod.CONFIG.balTimerX, NucleusMod.CONFIG.balTimerY,
 			clampScale(NucleusMod.CONFIG.balTimerScale),
-			() -> {
-				NucleusMod.CONFIG.balTimerX = entries.get(0).x;
-				NucleusMod.CONFIG.balTimerY = entries.get(0).y;
-				NucleusMod.CONFIG.balTimerScale = entries.get(0).scale;
+			e -> {
+				NucleusMod.CONFIG.balTimerX = e.x;
+				NucleusMod.CONFIG.balTimerY = e.y;
+				NucleusMod.CONFIG.balTimerScale = e.scale;
 			}));
 		entries.add(new Entry("Speedrun timer", speedrunLines(), speedrunColors(), HudText.ones(2),
 			NucleusMod.SPEEDRUN.speedTimerX, NucleusMod.SPEEDRUN.speedTimerY,
 			clampScale(NucleusMod.SPEEDRUN.speedTimerScale),
-			() -> {
-				NucleusMod.SPEEDRUN.speedTimerX = entries.get(1).x;
-				NucleusMod.SPEEDRUN.speedTimerY = entries.get(1).y;
-				NucleusMod.SPEEDRUN.speedTimerScale = entries.get(1).scale;
+			e -> {
+				NucleusMod.SPEEDRUN.speedTimerX = e.x;
+				NucleusMod.SPEEDRUN.speedTimerY = e.y;
+				NucleusMod.SPEEDRUN.speedTimerScale = e.scale;
 			}));
 		String day = LobbyDay.displayDay();
 		String lobby = LobbyDay.displayLobby();
@@ -111,36 +115,36 @@ public class MoveHudScreen extends Screen {
 			HudText.ones(2),
 			NucleusMod.CONFIG.lobbyDayX, NucleusMod.CONFIG.lobbyDayY,
 			clampScale(NucleusMod.CONFIG.lobbyDayScale),
-			() -> {
-				NucleusMod.CONFIG.lobbyDayX = entries.get(2).x;
-				NucleusMod.CONFIG.lobbyDayY = entries.get(2).y;
-				NucleusMod.CONFIG.lobbyDayScale = entries.get(2).scale;
+			e -> {
+				NucleusMod.CONFIG.lobbyDayX = e.x;
+				NucleusMod.CONFIG.lobbyDayY = e.y;
+				NucleusMod.CONFIG.lobbyDayScale = e.scale;
 			}));
 		entries.add(new Entry("Scavenger tracker",
 			new String[] {
 				"Tools: " + Scavenger.toolEvents() + " (" + String.format("%.1f", Scavenger.toolsPerHour()) + "/h)",
-				"Avg full set: " + fmtLong(Scavenger.avgSetMs()),
-				"Avg find chest: " + fmtDecimal(DivanDetectorSolver.avgFindMs())
+				"Avg full set: " + ScavengerHud.fmtLong(Scavenger.avgSetMs()),
+				"Avg find chest: " + ScavengerHud.fmtDecimal(DivanDetectorSolver.avgFindMs())
 			},
 			new int[] { 0xFFFFFFFF, 0xFF55FF55, 0xFFFFFF55 },
 			HudText.ones(3),
 			NucleusMod.CONFIG.scavengerX, NucleusMod.CONFIG.scavengerY,
 			clampScale(NucleusMod.CONFIG.scavengerScale),
-			() -> {
-				NucleusMod.CONFIG.scavengerX = entries.get(3).x;
-				NucleusMod.CONFIG.scavengerY = entries.get(3).y;
-				NucleusMod.CONFIG.scavengerScale = entries.get(3).scale;
+			e -> {
+				NucleusMod.CONFIG.scavengerX = e.x;
+				NucleusMod.CONFIG.scavengerY = e.y;
+				NucleusMod.CONFIG.scavengerScale = e.scale;
 			}));
-		entries.add(new Entry("Divan chest",
-			new String[] { "Divan chest: 12m", "690, 69, 566" },
-			new int[] { 0xFF55FF55, 0xFFAAAAAA },
-			HudText.ones(2),
-			NucleusMod.CONFIG.divanChestHudX, NucleusMod.CONFIG.divanChestHudY,
-			clampScale(NucleusMod.CONFIG.divanChestHudScale),
-			() -> {
-				NucleusMod.CONFIG.divanChestHudX = entries.get(4).x;
-				NucleusMod.CONFIG.divanChestHudY = entries.get(4).y;
-				NucleusMod.CONFIG.divanChestHudScale = entries.get(4).scale;
+		entries.add(new Entry("Terror stacks",
+			new String[] { String.valueOf(TerrorStacks.count()) },
+			new int[] { TerrorStacks.color() },
+			HudText.ones(1),
+			NucleusMod.CONFIG.terrorStacksX, NucleusMod.CONFIG.terrorStacksY,
+			clampScale(NucleusMod.CONFIG.terrorStacksScale),
+			e -> {
+				NucleusMod.CONFIG.terrorStacksX = e.x;
+				NucleusMod.CONFIG.terrorStacksY = e.y;
+				NucleusMod.CONFIG.terrorStacksScale = e.scale;
 			}));
 		float rngScale = clampScale(NucleusMod.CONFIG.rngdleHudScale);
 		String[] rngLines = new String[] {
@@ -155,12 +159,12 @@ public class MoveHudScreen extends Screen {
 			rngY = (int) Math.max(0, this.height * 0.38f - ph / 2f);
 		}
 		entries.add(new Entry("RNGdle", rngLines,
-			new int[] { 0xFFFFD700, 0xFFFFFFFF, 0x5555FF, 0xFFAAAAAA, 0xFFFFFFFF, 0xFF777777 },
+			new int[] { 0xFFFFD700, 0xFFFFFFFF, 0xFF5555FF, 0xFFAAAAAA, 0xFFFFFFFF, 0xFF777777 },
 			HudText.ones(6), rngX, rngY, rngScale,
-			() -> {
-				NucleusMod.CONFIG.rngdleHudX = entries.get(5).x;
-				NucleusMod.CONFIG.rngdleHudY = entries.get(5).y;
-				NucleusMod.CONFIG.rngdleHudScale = entries.get(5).scale;
+			e -> {
+				NucleusMod.CONFIG.rngdleHudX = e.x;
+				NucleusMod.CONFIG.rngdleHudY = e.y;
+				NucleusMod.CONFIG.rngdleHudScale = e.scale;
 			}));
 		entries.add(alertEntry());
 		// Keep everything on screen (window may have shrunk since saving).
@@ -193,8 +197,7 @@ public class MoveHudScreen extends Screen {
 		int x = (int) (this.width / 2f + NucleusMod.CONFIG.alertOffX - boxW / 2f);
 		int y = (int) (this.height / 2f + NucleusMod.CONFIG.alertOffY);
 		return new Entry("Alerts", lines, colors, AlertHud.LINE_SCALES, x, y, scale,
-			() -> {
-				Entry e = entries.get(6);
+			e -> {
 				float bw = (HudText.width(this.font, e.lines, e.lineScales) + PAD * 2) * e.scale;
 				NucleusMod.CONFIG.alertOffX = Math.round(e.x + bw / 2f - this.width / 2f);
 				NucleusMod.CONFIG.alertOffY = Math.round(e.y - this.height / 2f);
@@ -224,27 +227,9 @@ public class MoveHudScreen extends Screen {
 		return new int[] { 0xFFFFFFFF, 0xFF55FFFF };
 	}
 
-	private static String fmtLong(long ms) {
-		if (ms < 0) {
-			return "--:--";
-		}
-		long totalSec = ms / 1000L;
-		return (totalSec / 60L) + ":" + String.format("%02d", totalSec % 60L);
-	}
-
-	/** m:ss.t with tenths (e.g. 2:05.3). */
-	private static String fmtDecimal(long ms) {
-		if (ms < 0) {
-			return "--:--";
-		}
-		long totalSec = ms / 1000L;
-		long t = (ms % 1000L) / 100L;
-		return (totalSec / 60L) + ":" + String.format("%02d", totalSec % 60L) + "." + t;
-	}
-
 	private void saveAll() {
 		for (Entry e : entries) {
-			e.commit.run();
+			e.commit.accept(e);
 		}
 		NucleusMod.CONFIG.save();
 		NucleusMod.SPEEDRUN.save();

@@ -27,6 +27,8 @@ public final class MadoBrickKeybinds {
 	public static KeyMapping SET_CUSTOM;
 	/** Unbound by default; removes the most recent custom waypoint. */
 	public static KeyMapping REMOVE_LAST_CUSTOM;
+	/** Unbound by default; jumps the gambling wheel to its last second. */
+	public static KeyMapping QUICK_SPIN;
 
 	private MadoBrickKeybinds() {
 	}
@@ -56,10 +58,23 @@ public final class MadoBrickKeybinds {
 				MADOBRICK_CATEGORY
 			)
 		);
+		QUICK_SPIN = KeyMappingHelper.registerKeyMapping(
+			new KeyMapping(
+				"key.nucleus.quick_spin",
+				InputConstants.Type.KEYSYM,
+				InputConstants.UNKNOWN.getValue(),
+				MADOBRICK_CATEGORY
+			)
+		);
 	}
 
 	/** Called every client tick; captures waypoints when a hotkey is pressed. */
 	public static void tick(net.minecraft.client.Minecraft client) {
+		if (QUICK_SPIN != null) {
+			while (QUICK_SPIN.consumeClick()) {
+				JackpotAnimation.quickSpin();
+			}
+		}
 		if (client.player == null || client.level == null) {
 			return;
 		}
@@ -158,6 +173,13 @@ public final class MadoBrickKeybinds {
 			return Component.literal("unbound");
 		}
 		return SET_CUSTOM.getTranslatedKeyMessage();
+	}
+
+	public static Component quickSpinBoundKeyLabel() {
+		if (QUICK_SPIN == null) {
+			return Component.literal("unbound");
+		}
+		return QUICK_SPIN.getTranslatedKeyMessage();
 	}
 
 	public static Component removeLastBoundKeyLabel() {

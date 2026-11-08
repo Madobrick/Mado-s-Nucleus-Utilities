@@ -36,7 +36,6 @@ public final class DyeCelebration {
 	private static final long DURATION_MS = 4500L;
 
 	private static long startAt = 0L;
-	private static String winner = "";
 
 	private static final net.minecraft.resources.Identifier DYE_STING =
 		net.minecraft.resources.Identifier.fromNamespaceAndPath(NucleusMod.MOD_ID, "sounds/dye.mp3");
@@ -118,21 +117,12 @@ public final class DyeCelebration {
 		return Math.min(1f, p);
 	}
 
-	/** Seconds since the celebration started (0 while idle). */
-	public static double elapsedS() {
-		if (!active()) {
-			return 0.0;
-		}
-		return (System.currentTimeMillis() - startAt) / 1000.0;
-	}
-
 	/** Full preview: chat + animation + sounds. Unlocking is separate. */
 	public static void preview(Minecraft client, String playerName) {
 		if (client == null) {
 			return;
 		}
 		String name = (playerName == null || playerName.isBlank()) ? "Player" : playerName;
-		winner = name;
 		// Vanilla dye-drop block, matching the real broadcast segment for
 		// segment: pink-bold WOW!, the player's real display name (rank
 		// colors included, exactly as Hypixel renders it), white connectors,
@@ -170,7 +160,6 @@ public final class DyeCelebration {
 
 	public static void reset() {
 		startAt = 0L;
-		winner = "";
 	}
 
 	/**

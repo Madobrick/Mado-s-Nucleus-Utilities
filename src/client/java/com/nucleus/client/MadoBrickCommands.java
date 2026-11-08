@@ -15,10 +15,10 @@ import com.nucleus.NucleusMod;
  * The only client commands: /mado (config), /mado times|runs (run history),
  * /mado stop (reset speedrun), /mado lobbyStats (current lobby totals),
  * /mado safe (safe mode), /mado syncRuns (adopt official run total),
- * /madodebug (diagnostics), /madodebug achievement|rngdle|dye (previews),
+ * /madodebug (status dump for bug reports),
  * /madodebug disableTabwarn (wire for the [Don't show again] button).
- * Everything else was cut on purpose.
- */public final class MadoBrickCommands {
+ */
+public final class MadoBrickCommands {
 	private MadoBrickCommands() {
 	}
 
@@ -32,17 +32,32 @@ import com.nucleus.NucleusMod;
 				.then(ClientCommands.literal("lobbyStats").executes(MadoBrickCommands::lobbyStats))
 				.then(ClientCommands.literal("safe").executes(MadoBrickCommands::safe))
 				.then(ClientCommands.literal("syncRuns").executes(MadoBrickCommands::syncRuns)));
+			// Temporary (testing themes): opens every theme until the game closes.
+			dispatcher.register(ClientCommands.literal("madounlock").executes(ctx -> {
+				NucleusTheme.unlockAllForSession();
+				MadoChat.feedback(ctx.getSource(), Component.literal(
+					"\u00a7b[MNU] \u00a77All themes unlocked until you close the game."));
+				return 1;
+			}));
+			// Temporary (testing seasons): /madoseason <season|auto> until the game closes.
+			var seasonCmd = ClientCommands.literal("madoseason");
+			seasonCmd.then(ClientCommands.literal("auto").executes(ctx -> {
+				NucleusSeason.preview(null);
+				MadoChat.feedback(ctx.getSource(), Component.literal("\u00a7b[MNU] \u00a77Seasons follow the date again."));
+				return 1;
+			}));
+			for (NucleusSeason.Season se : NucleusSeason.Season.values()) {
+				final NucleusSeason.Season season = se;
+				seasonCmd.then(ClientCommands.literal(se.name().toLowerCase(java.util.Locale.ROOT)).executes(ctx -> {
+					NucleusSeason.preview(season);
+					MadoChat.feedback(ctx.getSource(), Component.literal(
+						"\u00a7b[MNU] \u00a77Previewing \u00a7f" + season.label + "\u00a77 until you close the game."));
+					return 1;
+				}));
+			}
+			dispatcher.register(seasonCmd);
 			dispatcher.register(ClientCommands.literal("madodebug")
 				.executes(MadoBrickCommands::debug)
-				.then(ClientCommands.literal("achievement")
-					.then(ClientCommands.argument("tier", com.mojang.brigadier.arguments.StringArgumentType.word())
-						.executes(MadoBrickCommands::debugAchievement)))
-				.then(ClientCommands.literal("rngdle")
-					.executes(MadoBrickCommands::rngdleTest)
-					.then(ClientCommands.argument("number",
-						com.mojang.brigadier.arguments.IntegerArgumentType.integer(0, 1000000))
-						.executes(MadoBrickCommands::rngdleTestNumber)))
-				.then(ClientCommands.literal("dye").executes(MadoBrickCommands::dye))
 				.then(ClientCommands.literal("disableTabwarn").executes(MadoBrickCommands::dismissTabWarn)));
 		});
 	}
@@ -64,40 +79,6 @@ import com.nucleus.NucleusMod;
 
 	private static int lobbyStats(CommandContext<FabricClientCommandSource> ctx) {
 		SpeedrunManager.printLobbyStats();
-		return 1;
-	}
-
-		private static int debugAchievement(CommandContext<FabricClientCommandSource> ctx) {
-		String tier;
-		try {
-			tier = ctx.getArgument("tier", String.class);
-		} catch (Exception ignored) {
-			tier = "";
-		}
-		String shown = Achievements.previewTier(tier);
-		if (shown == null) {
-			MadoChat.err(ctx.getSource(), Component.literal(
-				"§b[MNU] §7Usage: /madodebug achievement <easy|medium|challenging|hard|veryhard|impossible>"));
-			return 0;
-		}
-		MadoChat.feedback(ctx.getSource(), Component.literal(
-			"§b[MNU] §7Preview only - nothing unlocked."));
-		return 1;
-	}
-
-	private static int rngdleTest(CommandContext<FabricClientCommandSource> ctx) {
-		RngdleGame.startTest(null);
-		return 1;
-	}
-
-	private static int rngdleTestNumber(CommandContext<FabricClientCommandSource> ctx) {
-		int n;
-		try {
-			n = ctx.getArgument("number", Integer.class);
-		} catch (Exception ignored) {
-			return 0;
-		}
-		RngdleGame.startTest(n);
 		return 1;
 	}
 
@@ -140,19 +121,9 @@ import com.nucleus.NucleusMod;
 			? "§aactive §7(" + JackpotAnimation.type().displayName + ")" : "§8idle"));
 		out.add("§7Pet widget: " + (PetAlert.widgetFound() ? "§afound" : "§cnot found")
 			+ " §7| pet: §f" + (PetAlert.currentPet() == null ? "-" : PetAlert.currentPet()));
+		long ago = BalWatch.secondsSinceSeen();
 		out.add("§7Bal state: §f" + BalWatch.state()
-			+ " §7| last seen: §f" + (BalWatch.lastSeenName() == null ? "-" : BalWatch.lastSeenName())
-			+ " §7(size §f" + BalWatch.lastSeenSize() + "§7)");
-		try {
-			if (client.level != null) {
-				java.util.List<String> bars = BalWatch.lastBossNames();
-				out.add("§7BalBoss: §f" + (bars.isEmpty() ? "none" : String.join(" §7| §f", bars)));
-				out.add("§7BalSide: §f" + (BalWatch.sidebarHit() ? "yes" : "no"));
-				String burst = BalWatch.burstInfo();
-				out.add("§7BalBurst: §f" + (burst.isEmpty() ? "none yet" : burst));
-			}
-		} catch (Exception ignored) {
-		}
+			+ " §7| last seen: §f" + (ago < 0 ? "never" : ago + "s ago"));
 		out.add("§7Scavenger held: §f" + Scavenger.heldTools()
 			+ " §7| rate: §f" + String.format("%.1f", Scavenger.toolsPerHour()) + "/h"
 			+ " §7| sets: §e" + Scavenger.setsCompleted());
@@ -189,23 +160,6 @@ import com.nucleus.NucleusMod;
 		NucleusMod.CONFIG.save();
 		MadoChat.feedback(ctx.getSource(), Component.literal(
 			"§b[MNU] §7Safe mode: " + (next ? "§aON §7(only /warp nucleus|cn)" : "§cOFF")));
-		return 1;
-	}
-
-	/** Preview of the fake Tool Dye celebration (chat + animation + sound, no unlock). */
-	private static int dye(CommandContext<FabricClientCommandSource> ctx) {
-		Minecraft client = Minecraft.getInstance();
-		if (client == null || client.player == null) {
-			MadoChat.err(ctx.getSource(), Component.literal("No player."));
-			return 0;
-		}
-		String name;
-		try {
-			name = client.player.getScoreboardName();
-		} catch (Exception ignored) {
-			name = "Player";
-		}
-		DyeCelebration.preview(client, name);
 		return 1;
 	}
 

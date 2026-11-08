@@ -53,6 +53,15 @@ public final class ItemPopup {
 	private static float offX;
 	private static float offY;
 	private static boolean mirrorHalf;
+	/**
+	 * Optional live lighting for the pop: returns {packed light, packed
+	 * overlay} each frame (null = full bright, no overlay, like vanilla).
+	 */
+	public static volatile java.util.function.Supplier<int[]> lighting = null;
+	/** Fraction of the play where the pop peaks (0 = vanilla timing). */
+	private static float peakAt;
+	/** Longest popup (20s): the jackpot roll-up can run past 10s on billion-coin drops. */
+	public static final int MAX_TICKS = 400;
 
 	/**
 	 * Starts the popup. {@code ticks} is the full play length in game ticks
@@ -66,11 +75,22 @@ public final class ItemPopup {
 	 */
 	public static void popup(ItemStack s, int ticks, boolean altRotationCurve, boolean angledPose,
 		boolean fastStartWarp, float yawOffsetDegrees) {
+		popup(s, ticks, altRotationCurve, angledPose, fastStartWarp, yawOffsetDegrees, 0f);
+	}
+
+	/**
+	 * Same, but the pop's peak (the middle of vanilla's curve, where the
+	 * item is closest and biggest) lands at {@code peakFraction} of the
+	 * play instead of halfway: the time before and after it stretch to fit.
+	 */
+	public static void popup(ItemStack s, int ticks, boolean altRotationCurve, boolean angledPose,
+		boolean fastStartWarp, float yawOffsetDegrees, float peakFraction) {
+		peakAt = peakFraction > 0.05f && peakFraction < 0.95f ? peakFraction : 0f;
 		if (s == null || s.isEmpty()) {
 			return;
 		}
 		try {
-			totalTicks = Mth.clamp(ticks, 1, 200);
+			totalTicks = Mth.clamp(ticks, 1, MAX_TICKS);
 			ticksLeft = totalTicks;
 			stack = s.copy();
 			altCurve = altRotationCurve;
@@ -147,6 +167,10 @@ public final class ItemPopup {
 		SubmitNodeCollector collector, float partialTicks) {
 		PoseStack poseStack = new PoseStack();
 		float progress = (elapsedTicks + partialTicks) / total;
+		if (peakAt > 0f) {
+			float pr = Mth.clamp(progress, 0f, 1f);
+			progress = pr < peakAt ? 0.5f * pr / peakAt : 0.5f + 0.5f * (pr - peakAt) / (1f - peakAt);
+		}
 		if (fastStart) {
 			// Hurry the dull opening: mid-motion arrives ~a quarter early,
 			// the tail eases out a touch longer instead.
@@ -196,6 +220,19 @@ public final class ItemPopup {
 		minecraft.gameRenderer.getLighting().setupFor(Lighting.Entry.ITEMS_3D);
 		ItemStackRenderState state = new ItemStackRenderState();
 		minecraft.getItemModelResolver().updateForTopItem(state, s, ItemDisplayContext.FIXED, minecraft.level, null, 0);
-		state.submit(poseStack, collector, 15728880, OverlayTexture.NO_OVERLAY, 0);
+		int light = 15728880;
+		int overlay = OverlayTexture.NO_OVERLAY;
+		java.util.function.Supplier<int[]> lit = lighting;
+		if (lit != null) {
+			try {
+				int[] l = lit.get();
+				if (l != null && l.length >= 2) {
+					light = l[0];
+					overlay = l[1];
+				}
+			} catch (Exception ignored) {
+			}
+		}
+		state.submit(poseStack, collector, light, overlay, 0);
 	}
 }

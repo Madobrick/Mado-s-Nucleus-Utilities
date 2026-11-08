@@ -109,18 +109,41 @@ public final class HollowsDetector {
 		}
 		ticksSinceLastCheck = 0;
 
+		// One scoreboard read per poll. Recombined team lines are included
+		// because a location can straddle a prefix/suffix boundary ("Mines of
+		// Divan" is 17 chars with its icon).
+		List<String> lines = sidebarLines(client);
+		if (client.level != null) {
+			lines.addAll(combinedTeamLines(client.level.getScoreboard()));
+		}
 		Optional<String> area = tabArea(client);
 		if (area.isPresent()) {
 			inHollows = area.get().toLowerCase().contains("crystal hollows");
 		} else {
-			inHollows = detectsHollows(client);
+			inHollows = anyLine(lines, KEYWORDS);
 			maybeWarnNoArea(client);
 		}
 		// Location details share the 1Hz poll so HUDs (per-frame) and
 		// trackers never scan the scoreboard themselves.
-		inMines = scanMines(client);
-		inNucleus = scanNucleus(client);
-		inKhazad = scanKhazad(client);
+		inMines = anyLine(lines, "mines of divan");
+		inNucleus = anyLine(lines, "crystal nucleus");
+		inKhazad = anyLine(lines, "khazad");
+	}
+
+	private static boolean anyLine(List<String> lines, String... needles) {
+		for (String line : lines) {
+			for (String needle : needles) {
+				if (line.contains(needle)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/** Hollows keyword test for one stripped, lowercased line (debug listing). */
+	public static boolean matches(String strippedLower) {
+		return strippedLower != null && anyLine(List.of(strippedLower), KEYWORDS);
 	}
 
 	/**
@@ -194,41 +217,6 @@ public final class HollowsDetector {
 			.append(dismiss));
 	}
 
-	private static boolean detectsHollows(Minecraft client) {
-		for (String line : sidebarLines(client)) {
-			if (matches(line)) {
-				return true;
-			}
-		}
-		// Same split-field hazard as the temple check: a keyword can straddle
-		// a prefix/suffix boundary, so also match recombined team lines.
-		ClientLevel level = client.level;
-		if (level == null) {
-			return false;
-		}
-		Scoreboard scoreboard = level.getScoreboard();
-		if (scoreboard == null) {
-			return false;
-		}
-		for (String line : combinedTeamLines(scoreboard)) {
-			if (matches(line)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	public static boolean matches(String strippedLower) {
-		if (strippedLower == null) {
-			return false;
-		}
-		for (String kw : KEYWORDS) {
-			if (strippedLower.contains(kw)) {
-				return true;
-			}
-		}
-		return false;
-	}
 
 	/** Owners holding a sidebar score; only their teams render sidebar lines. */
 	private static Set<String> sidebarOwners(Scoreboard scoreboard) {
@@ -303,11 +291,11 @@ public final class HollowsDetector {
 		}
 		return out;
 	}
+
 	/** True when the sidebar location is the Mines of Divan (1Hz cached). */
 	public static boolean inMinesOfDivan(Minecraft client) {
 		return inMines;
 	}
-
 
 	/** True when the sidebar location is the Crystal Nucleus (1Hz cached). */
 	public static boolean inCrystalNucleus(Minecraft client) {
@@ -319,67 +307,7 @@ public final class HollowsDetector {
 		return inKhazad;
 	}
 
-	private static boolean scanMines(Minecraft client) {
-		if (client == null || client.level == null) {
-			return false;
-		}
-		for (String line : sidebarLines(client)) {
-			if (line.contains("mines of divan")) {
-				return true;
-			}
-		}
-		// Same split-field hazard as the temple check: "Mines of Divan"
-		// is 17 chars with its icon, so it straddles prefix/suffix.
-		Scoreboard scoreboard = client.level.getScoreboard();
-		if (scoreboard != null) {
-			for (String line : combinedTeamLines(scoreboard)) {
-				if (line.contains("mines of divan")) {
-					return true;
-				}
-			}
-		}
-		return false;
-	}
 
-	private static boolean scanNucleus(Minecraft client) {
-		if (client == null || client.level == null) {
-			return false;
-		}
-		for (String line : sidebarLines(client)) {
-			if (line.contains("crystal nucleus")) {
-				return true;
-			}
-		}
-		Scoreboard scoreboard = client.level.getScoreboard();
-		if (scoreboard != null) {
-			for (String line : combinedTeamLines(scoreboard)) {
-				if (line.contains("crystal nucleus")) {
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-
-	private static boolean scanKhazad(Minecraft client) {
-		if (client == null || client.level == null) {
-			return false;
-		}
-		for (String line : sidebarLines(client)) {
-			if (line.contains("khazad")) {
-				return true;
-			}
-		}
-		Scoreboard scoreboard = client.level.getScoreboard();
-		if (scoreboard != null) {
-			for (String line : combinedTeamLines(scoreboard)) {
-				if (line.contains("khazad")) {
-					return true;
-				}
-			}
-		}
-		return false;
-	}
 
 	/** Stripped sidebar lines (lowercase, formatting removed) for detection + debug. */
 	public static List<String> sidebarLines(Minecraft client) {

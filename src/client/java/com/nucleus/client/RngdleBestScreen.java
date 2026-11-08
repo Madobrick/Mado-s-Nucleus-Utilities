@@ -5,7 +5,6 @@ import java.util.List;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
@@ -44,7 +43,7 @@ public class RngdleBestScreen extends Screen {
 			detailEp = 0;
 		}
 		int cx = this.width / 2;
-		addRenderableWidget(Button.builder(
+		addRenderableWidget(NucleusUi.NButton.create(
 			Component.literal(selected >= 0 ? "Back to list" : "Back"),
 			btn -> {
 				if (selected >= 0) {
@@ -117,6 +116,13 @@ public class RngdleBestScreen extends Screen {
 			}
 		} catch (Exception ignored) {
 		}
+	}
+
+	@Override
+	public void extractBackground(GuiGraphicsExtractor gfx, int mouseX, int mouseY, float partialTick) {
+		NucleusUi.backdrop(gfx, this.width, this.height, this.minecraft != null && this.minecraft.level != null);
+		NucleusUi.panel(gfx, Math.max(6, this.width / 2 - 180), 6, Math.min(this.width - 6, this.width / 2 + 180),
+			this.height - 6, 0xFFD34A);
 	}
 
 	@Override

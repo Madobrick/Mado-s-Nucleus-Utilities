@@ -110,6 +110,10 @@ public final class SystemAudio {
 			final CachedSound sound = cached;
 			final float vol = volume01;
 			final float pit = pitch <= 0f ? 1.0f : pitch;
+			// Low-latency path: straight into the always-open mixer line.
+			if (SynthMixer.playPcm(sound.pcm(), sound.format(), vol, pit)) {
+				return true;
+			}
 			Thread thread = new Thread(() -> playPcm(sound, vol, pit), "nucleus-system-sound");
 			thread.setDaemon(true);
 			thread.start();
@@ -269,6 +273,11 @@ public final class SystemAudio {
 			final CachedSound finalSound = cached;
 			final float vol = volume01;
 			final float pit = pitch <= 0f ? 1.0f : pitch;
+			// Low-latency path: straight into the always-open mixer line
+			// (a fresh Clip per hit lands 30-200 ms late on Windows).
+			if (SynthMixer.playPcm(finalSound.pcm(), finalSound.format(), vol, pit)) {
+				return true;
+			}
 			Thread thread = new Thread(() -> playPcm(finalSound, vol, pit), "nucleus-system-sound");
 			thread.setDaemon(true);
 			thread.start();
@@ -276,6 +285,70 @@ public final class SystemAudio {
 		} catch (Exception e) {
 			failOnce(eventId, "play threw: " + e);
 			return false;
+		}
+	}
+
+	/**
+	 * A sound event's (first variant's) decoded audio as mono floats, for
+	 * scheduling on the mixer clock: {@code {samples, {sampleRate}}}, or null.
+	 */
+	public static float[][] floatPcm(SoundEvent event) {
+		try {
+			Minecraft client = Minecraft.getInstance();
+			if (client == null || event == null) {
+				return null;
+			}
+			Identifier cur = event.location();
+			Sound sound = null;
+			for (int hop = 0; hop <= 3; hop++) {
+				WeighedSoundEvents events = client.getSoundManager().getSoundEvent(cur);
+				if (events == null) {
+					return null;
+				}
+				sound = events.getSound(RandomSource.create(1L));
+				if (sound == null || sound == SoundManager.EMPTY_SOUND) {
+					return null;
+				}
+				if (sound.getType() != Sound.Type.SOUND_EVENT) {
+					break;
+				}
+				cur = sound.getLocation();
+				sound = null;
+			}
+			if (sound == null || sound.getType() != Sound.Type.FILE) {
+				return null;
+			}
+			Identifier file = sound.getPath();
+			CachedSound cached;
+			synchronized (CACHE) {
+				cached = CACHE.get(file.toString());
+			}
+			if (cached == null) {
+				cached = decodeFile(client, event.location(), file);
+				if (cached == null) {
+					return null;
+				}
+				synchronized (CACHE) {
+					if (CACHE.size() >= MAX_CACHE) {
+						CACHE.clear();
+					}
+					CACHE.put(file.toString(), cached);
+				}
+			}
+			float[][] ch = SynthMixer.toFloat(cached.pcm(), cached.format());
+			if (ch == null) {
+				return null;
+			}
+			float[] mono = ch[0];
+			if (ch.length > 1) {
+				mono = new float[ch[0].length];
+				for (int i = 0; i < mono.length; i++) {
+					mono[i] = 0.5f * (ch[0][i] + ch[1][i]);
+				}
+			}
+			return new float[][] { mono, { cached.format().getSampleRate() } };
+		} catch (Exception e) {
+			return null;
 		}
 	}
 

@@ -1,337 +1,205 @@
 package com.nucleus.client;
 
+import java.util.Locale;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.MagmaCube;
 import net.minecraft.world.phys.Vec3;
 
 import com.nucleus.NucleusMod;
 
 /**
- * Bal presence tracking (Idea 1): Bal is a giant magma cube, so the client
- * can see the exact moments he appears and vanishes by watching entities —
- * no chat, no guessing. Kill chat flips the state to DED instead.
- *
- * <p>Polled, not packet-hooked: a 4Hz render-entity sweep is plenty for a
- * state display (±250ms) and can't crash the netty thread.
+ * Bal detector, tuned on a logged spawn / despawn / kill session:
+ * <ul>
+ * <li><b>Which cube is Bal.</b> Bal and the Yogs filling Khazad-dûm are
+ * all magma cubes, but Bal's max health attribute reads 1 while every Yog
+ * has 35,000 (or a multiple). Max health arrives with the body, so no
+ * nameplate is needed and it works as far out as his body loads.</li>
+ * <li><b>SPAWNING.</b> He appears at size 1 and grows (1, 3, 7, 11 ... 27,
+ * 29) to full size 29, when he turns active ("[BOSS] Bal: You cannot best
+ * me!" lands right at 27 -> 29). Body below full size = still spawning.
+ * The spawn chat line ("The ground starts to shake...") arrives in the
+ * same instant and covers the gap before his body loads.</li>
+ * <li><b>SPAWNED.</b> Body at active size (27+): switches the tick it gets there.
+ * (Also if he stops growing at a big size, in case Hypixel ever changes
+ * the final size.)</li>
+ * <li><b>DESPAWNED.</b> Body gone: switches the poll it disappears (no
+ * grace period); standing in Khazad-dûm with no body is despawned too.
+ * Only a body that vanished because you teleported far away (beyond any
+ * load range) doesn't count; that's UNKNOWN until something new is
+ * seen.</li>
+ * <li><b>DED.</b> The death line ("...retreats into the lava") starts the
+ * 60s {@link BalTimer}; while it runs he's dead (he shrinks 29 -> ~18
+ * and vanishes during it).</li>
+ * </ul>
+ * Polled every client tick in the Hollows, so changes show within 50ms.
  */
 public final class BalWatch {
 	public enum BalState {
-		SPAWNED, DESPAWNED, DED
+		SPAWNING, SPAWNED, DESPAWNED, DED, UNKNOWN
 	}
 
-	private static boolean present = false;
-	private static long lastSeenMs = 0L;
-	private static long lastGoneMs = 0L;
-	private static long dedAt = 0L;
-	private static int tickCounter = 0;
-	private static String lastSeenName = null;
-	private static int lastSeenSize = 0;
-	/** Last burst (debug), capped. */
-	private static final java.util.List<String> lastBossNames = new java.util.ArrayList<>();
-	private static boolean sidebarHit = false;
-	/** Pending particle burst for the tick thread (packet thread only records). */
-	private static volatile double burstX = 0.0;
-	private static volatile double burstY = 0.0;
-	private static volatile double burstZ = 0.0;
-	private static volatile long burstAt = 0L;
-	private static volatile int burstCount = 0;
-	private static volatile String burstType = "";
-	/** Cube search radius around a burst + burst memory. */
-	private static final double BURST_RADIUS = 8.0;
-	private static final long BURST_FRESH_MS = 2000L;
+	private static final String SPAWN_LINE = "the ground starts to shake and the lava bubbles";
+	/**
+	 * Active from size 27 on (from the log: he grows ... 23, 27, 29 and was
+	 * already fighting back at 27; 29 is the final size).
+	 */
+	private static final int FULL_SIZE = 27;
+	/** If he ever stops growing above this for STALL_MS, treat him as fully spawned. */
+	private static final int BIG_SIZE = 20;
+	private static final long STALL_MS = 1_500L;
+	/** A spawn line counts as "spawning" this long while his body hasn't loaded yet. */
+	private static final long SPAWN_LINE_MS = 4_000L;
+	/** Bal max health reads 1; Yogs 35,000+. Anything this low on a magma cube is him. */
+	private static final int BAL_MAX_HEALTH_CAP = 1_000;
+	/** A body vanishing further than this was a teleport, not a despawn (blocks). */
+	private static final double TELEPORT_RANGE = 96.0;
+
+	private static long spawnLineAt = 0L;
+	private static boolean bodyPresent = false;
+	private static int bodySize = 0;
+	private static int maxSizeThisSpawn = 0;
+	private static long grewAt = 0L;
+	private static long bodySeenAt = 0L;
+	/** Last time his body was seen while he was alive (not shrinking after a death). */
+	private static long aliveSeenAt = 0L;
+	private static Vec3 bodyPos = null;
+	/** When his body vanished while we were in range (a despawn/death seen happening). */
+	private static long goneSeenAt = 0L;
+	private static boolean inArena = false;
+	private static boolean loggedYog = false;
 
 	private BalWatch() {
 	}
 
 	public static void resetLobby() {
-		present = false;
-		lastSeenMs = 0L;
-		lastGoneMs = 0L;
-		dedAt = 0L;
-		lastSeenName = null;
-		lastSeenSize = 0;
-		lastBossNames.clear();
-		sidebarHit = false;
-		burstAt = 0L;
-		burstCount = 0;
-		burstType = "";
+		spawnLineAt = 0L;
+		bodyPresent = false;
+		bodySize = 0;
+		maxSizeThisSpawn = 0;
+		grewAt = 0L;
+		bodySeenAt = 0L;
+		aliveSeenAt = 0L;
+		bodyPos = null;
+		goneSeenAt = 0L;
+		inArena = false;
+		loggedYog = false;
 	}
 
-	/** Particle packet hook: Bal's villager poof (or any huge burst) is recorded. */
-	public static void onParticles(double x, double y, double z, int count, String type) {
-		try {
-			String key = type == null ? "" : type.toLowerCase(java.util.Locale.ROOT);
-			boolean villager = key.endsWith("angry_villager");
-			// Bal's poof is unmistakable: take it small; anything else needs
-			// to be huge to qualify.
-			if (villager ? count < 10 : count < 40) {
-				return;
-			}
-			if (!HollowsDetector.isInCrystalHollows()) {
-				return;
-			}
-			burstX = x;
-			burstY = y;
-			burstZ = z;
-			burstAt = System.currentTimeMillis();
-			burstCount = count;
-			burstType = type == null ? "" : type;
-		} catch (Exception ignored) {
+	/** Server chat: the spawn line (the death line is handled by {@link BalTimer}). */
+	public static void onGameMessage(String raw) {
+		if (raw == null || !NucleusMod.CONFIG.balDetectorEnabled) {
+			return;
+		}
+		String low = HollowsDetector.stripFormatting(raw).toLowerCase(Locale.ROOT);
+		if (ChatLines.isPlayerChat(low)) {
+			return;
+		}
+		if (low.contains(SPAWN_LINE)) {
+			spawnLineAt = System.currentTimeMillis();
 		}
 	}
 
+	private static int maxHealth(MagmaCube cube) {
+		try {
+			return (int) cube.getAttributeBaseValue(Attributes.MAX_HEALTH);
+		} catch (Exception ignored) {
+			return -1;
+		}
+	}
+
+	/** Every client tick in the Hollows: is his body loaded, and how big is it? */
 	public static void tick(Minecraft client) {
-		tickCounter++;
-		if (tickCounter % 5 != 0) {
+		if (!NucleusMod.CONFIG.balDetectorEnabled) {
 			return;
 		}
-		if (client == null || client.player == null || client.level == null) {
+		if (client.player == null || client.level == null || !HollowsDetector.isInCrystalHollows()) {
+			bodyPresent = false;
+			inArena = false;
 			return;
-		}
-		if (!HollowsDetector.isInCrystalHollows()) {
-			return;
-		}
-		boolean found = false;
-		String name = null;
-		int size = 0;
-		// Vote 1 — boss bar named Bal: server-driven, works at any distance.
-		boolean bossBal = false;
-		try {
-			var overlay = client.gui.getBossOverlay();
-			var events = ((com.nucleus.client.mixin.BossOverlayAccessor) overlay).nucleus$getEvents();
-			lastBossNames.clear();
-			if (events != null) {
-				for (var event : events.values()) {
-					if (event == null) {
-						continue;
-					}
-					String bar;
-					try {
-						var comp = event.getName();
-						bar = comp == null ? null : comp.getString();
-					} catch (Exception ignored) {
-						continue;
-					}
-					if (bar == null || bar.isEmpty()) {
-						continue;
-					}
-					if (lastBossNames.size() < 3) {
-						lastBossNames.add(bar.trim());
-					}
-					// Exact-ish only: event banners ("PASSIVE EVENT ...")
-					// share the overlay and must never count.
-					String low = bar.toLowerCase(java.util.Locale.ROOT).trim();
-					if (low.equals("bal") || low.startsWith("bal ") || low.startsWith("bal -")) {
-						bossBal = true;
-					}
-				}
-			}
-		} catch (Exception ignored) {
-		}
-		// Vote 2 — sidebar Bal line (boss HP style): also distance-free.
-		boolean sideBal = false;
-		try {
-			for (String line : HollowsDetector.sidebarLines(client)) {
-				if (line != null
-					&& HollowsDetector.stripFormatting(line).toLowerCase(java.util.Locale.ROOT).contains("bal")) {
-					sideBal = true;
-					break;
-				}
-			}
-		} catch (Exception ignored) {
-		}
-		sidebarHit = sideBal;
-		try {
-			// Bal's floating nameplate (e.g. level + name) is a TextDisplay
-			// entity riding him — his own custom name is blank. Anchor on
-			// the text, then take the nearest magma cube to it.
-			Vec3 anchor = null;
-			for (Entity entity : client.level.entitiesForRendering()) {
-				if (!(entity instanceof net.minecraft.world.entity.Display.TextDisplay text)) {
-					continue;
-				}
-				String t;
-				try {
-					var comp = text.getText();
-					t = comp == null ? null : comp.getString();
-				} catch (Exception ignored) {
-					continue;
-				}
-				if (t != null && t.toLowerCase(java.util.Locale.ROOT).contains("bal")) {
-					try {
-						anchor = entity.position();
-					} catch (Exception ignored) {
-					}
-					break;
-				}
-			}
-			if (anchor != null) {
-				MagmaCube best = null;
-				double bestSq = 8.0 * 8.0;
-				for (Entity entity : client.level.entitiesForRendering()) {
-					if (!(entity instanceof MagmaCube cube)) {
-						continue;
-					}
-					try {
-						Vec3 p = entity.position();
-						double dx = p.x - anchor.x;
-						double dy = p.y - anchor.y;
-						double dz = p.z - anchor.z;
-						double sq = dx * dx + dy * dy + dz * dz;
-						if (sq < bestSq) {
-							bestSq = sq;
-							best = cube;
-						}
-					} catch (Exception ignored) {
-					}
-				}
-				if (best != null) {
-					found = true;
-					try {
-						size = best.getSize();
-					} catch (Exception ignored) {
-					}
-					try {
-						var custom = best.getCustomName();
-						name = custom == null ? null : custom.getString();
-					} catch (Exception ignored) {
-					}
-				}
-			}
-		} catch (Exception ignored) {
-			return;
-		}
-		// Burst check: magma cube in the middle of a fresh poof is Bal
-		// surfacing (or the one that just left — presence decides which).
-		try {
-			long age = System.currentTimeMillis() - burstAt;
-			if (burstAt > 0L && age < BURST_FRESH_MS) {
-				Minecraft mc = Minecraft.getInstance();
-				if (mc != null && mc.level != null) {
-					MagmaCube best = null;
-					double bestSq = BURST_RADIUS * BURST_RADIUS;
-					for (Entity entity : mc.level.entitiesForRendering()) {
-						if (!(entity instanceof MagmaCube cube)) {
-							continue;
-						}
-						try {
-							Vec3 p = entity.position();
-							double dx = p.x - burstX;
-							double dy = p.y - burstY;
-							double dz = p.z - burstZ;
-							double sq = dx * dx + dy * dy + dz * dz;
-							if (sq < bestSq) {
-								bestSq = sq;
-								best = cube;
-							}
-						} catch (Exception ignored) {
-						}
-					}
-					if (best != null) {
-						found = true;
-						try {
-							size = best.getSize();
-						} catch (Exception ignored) {
-						}
-						try {
-							var custom = best.getCustomName();
-							name = custom == null ? "burst" : custom.getString();
-						} catch (Exception ignored) {
-							name = "burst";
-						}
-					}
-				}
-			}
-		} catch (Exception ignored) {
-		}
-		// Any vote wins: entity anchor (close), boss bar or sidebar (far).
-		if (bossBal || sideBal) {
-			found = true;
 		}
 		long now = System.currentTimeMillis();
-		if (found) {
-			present = true;
-			dedAt = 0L;
-			lastSeenMs = now;
-			lastSeenName = name;
-			lastSeenSize = size;
-		} else {
-			if (present) {
-				lastGoneMs = now;
-			}
-			present = false;
-		}
-	}
-
-	/** Bal kill chat lines flip the state to DED (same triggers as BalTimer). */
-	public static void onGameMessage(String raw) {
-		if (raw == null) {
-			return;
-		}
+		MagmaCube bal = null;
 		try {
-			String lower = HollowsDetector.stripFormatting(raw).toLowerCase();
-			if (ChatLines.isPlayerChat(lower)) {
-				return;
-			}
-			if (lower.contains("looks weak and tired") || lower.contains("retreats into the lava")) {
-				dedAt = System.currentTimeMillis();
-				present = false;
+			for (Entity entity : client.level.entitiesForRendering()) {
+				if (!(entity instanceof MagmaCube cube) || !cube.isAlive()) {
+					continue;
+				}
+				int hp = maxHealth(cube);
+				if (hp > 0 && hp <= BAL_MAX_HEALTH_CAP) {
+					bal = cube;
+					break;
+				}
+				if (!loggedYog && hp > 0) {
+					loggedYog = true;
+					NucleusMod.LOGGER.info("BalWatch: Yog reference (size {}, max health {})", cube.getSize(), hp);
+				}
 			}
 		} catch (Exception ignored) {
+		}
+		inArena = HollowsDetector.inKhazadDum(client);
+		if (bal != null) {
+			int size = bal.getSize();
+			if (!bodyPresent) {
+				maxSizeThisSpawn = 0;
+				NucleusMod.LOGGER.info("BalWatch: Bal appeared (size {}, {} blocks away)", size,
+					(int) Math.sqrt(bal.distanceToSqr(client.player)));
+			}
+			if (size > maxSizeThisSpawn) {
+				maxSizeThisSpawn = size;
+				grewAt = now;
+			}
+			bodyPresent = true;
+			bodySize = size;
+			bodySeenAt = now;
+			if (!BalTimer.isRunning()) {
+				aliveSeenAt = now;
+			}
+			bodyPos = bal.position();
+		} else if (bodyPresent) {
+			bodyPresent = false;
+			double d = bodyPos == null ? 0 : Math.sqrt(bodyPos.distanceToSqr(client.player.position()));
+			boolean seenGo = d <= TELEPORT_RANGE;
+			if (seenGo) {
+				goneSeenAt = now;
+			}
+			NucleusMod.LOGGER.info("BalWatch: Bal gone ({} blocks away{})", (int) d, seenGo ? "" : ", teleported away");
 		}
 	}
 
 	public static BalState state() {
-		if (present) {
-			return BalState.SPAWNED;
-		}
-		if (dedAt > 0L) {
+		if (BalTimer.isRunning()) {
 			return BalState.DED;
 		}
-		return BalState.DESPAWNED;
-	}
-
-	public static long lastSeenMs() {
-		return lastSeenMs;
-	}
-
-	public static long lastGoneMs() {
-		return lastGoneMs;
-	}
-
-	public static long dedAt() {
-		return dedAt;
-	}
-
-	public static String lastSeenName() {
-		return lastSeenName;
-	}
-
-	public static int lastSeenSize() {
-		return lastSeenSize;
-	}
-
-	public static java.util.List<String> lastBossNames() {
-		return new java.util.ArrayList<>(lastBossNames);
-	}
-
-	public static boolean sidebarHit() {
-		return sidebarHit;
-	}
-
-	/** Last burst for /madodebug ("" when none yet). */
-	public static String burstInfo() {
-		try {
-			if (burstAt <= 0L) {
-				return "";
-			}
-			long age = System.currentTimeMillis() - burstAt;
-			return burstCount + "x " + burstType + " at "
-				+ (int) burstX + " " + (int) burstY + " " + (int) burstZ
-				+ " (" + age + "ms ago)";
-		} catch (Exception ignored) {
-			return "";
+		long now = System.currentTimeMillis();
+		if (bodyPresent) {
+			boolean full = bodySize >= FULL_SIZE
+				|| (maxSizeThisSpawn >= BIG_SIZE && now - grewAt >= STALL_MS);
+			return full ? BalState.SPAWNED : BalState.SPAWNING;
 		}
+		// Spawn line just arrived, body not loaded yet.
+		if (spawnLineAt > 0L && now - spawnLineAt < SPAWN_LINE_MS && spawnLineAt > goneSeenAt) {
+			return BalState.SPAWNING;
+		}
+		// Standing in his arena with no body: he's not there.
+		if (inArena) {
+			return BalState.DESPAWNED;
+		}
+		// Elsewhere: the newest thing we know. A death or a despawn we saw
+		// happen, with no sign of him alive since, means he's down.
+		long lastDown = Math.max(goneSeenAt, BalTimer.lastStartAt());
+		long lastUp = Math.max(aliveSeenAt, spawnLineAt);
+		if (lastDown > 0L && lastDown >= lastUp) {
+			return BalState.DESPAWNED;
+		}
+		return BalState.UNKNOWN;
+	}
+
+	/** Seconds since Bal was last known up (body or spawn line), -1 = never this lobby. */
+	public static long secondsSinceSeen() {
+		long last = Math.max(bodySeenAt, spawnLineAt);
+		return last <= 0L ? -1L : (System.currentTimeMillis() - last) / 1000L;
 	}
 }

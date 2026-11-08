@@ -6,7 +6,6 @@ import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.Entity;
 
-import com.nucleus.NucleusMod;
 import com.nucleus.client.ObjectiveSounds.Trigger;
 
 /**
@@ -74,7 +73,7 @@ public final class NpcTradeWatch {
 			if (entity == null) {
 				return;
 			}
-			if (triggerFor(namesOf(entity)) instanceof Trigger direct) {
+			if (triggerFor(MobHighlight.namesOf(entity)) instanceof Trigger direct) {
 				touch(direct);
 				return;
 			}
@@ -94,7 +93,7 @@ public final class NpcTradeWatch {
 						} catch (Exception ignored) {
 							continue;
 						}
-						if (triggerFor(namesOf(e)) instanceof Trigger near) {
+						if (triggerFor(MobHighlight.namesOf(e)) instanceof Trigger near) {
 							touch(near);
 						}
 					}
@@ -119,22 +118,6 @@ public final class NpcTradeWatch {
 			return Trigger.KEY;
 		}
 		return null;
-	}
-
-	private static String namesOf(Entity entity) {
-		StringBuilder hay = new StringBuilder();
-		try {
-			if (entity.getCustomName() != null) {
-				hay.append(HollowsDetector.stripFormatting(
-					entity.getCustomName().getString()).toLowerCase()).append('\n');
-			}
-			if (entity.getDisplayName() != null) {
-				hay.append(HollowsDetector.stripFormatting(
-					entity.getDisplayName().getString()).toLowerCase());
-			}
-		} catch (Exception ignored) {
-		}
-		return hay.toString();
 	}
 
 	/** Immediate re-check, fired by inventory packets the same tick the server syncs. */

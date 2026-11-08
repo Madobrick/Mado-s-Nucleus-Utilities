@@ -28,11 +28,4 @@ public final class MadoChat {
 		}
 		src.sendFeedback(text);
 	}
-
-	public static void err(FabricClientCommandSource src, Component text) {
-		if (!allowed() || src == null) {
-			return;
-		}
-		src.sendError(text);
-	}
 }

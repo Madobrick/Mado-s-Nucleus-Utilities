@@ -164,6 +164,17 @@ public class SpeedrunStore {
 		/** Coins the run cost (Jungle Key + robot parts / apparatus) at finish (-1 = unknown). */
 		public long runCost = -1;
 	}
+	/** A run whose only known detail is its time (from before full history was kept). */
+	private static RunRecord timeOnly(long totalMs) {
+		RunRecord r = new RunRecord();
+		r.totalMs = totalMs;
+		return r;
+	}
+
+	/** True for a run from before full details were kept: time only, no date, splits or loot. */
+	public static boolean isTimeOnly(RunRecord r) {
+		return r.finishedAt <= 0 && r.ids.isEmpty() && r.loot.isEmpty();
+	}
 	/** Every finished run, oldest first (no cap; kept in runs.json). */
 	public transient List<RunRecord> runHistory = new ArrayList<>();
 	/** Every finished run total, oldest first (no cap; kept in runs.json). */
@@ -419,6 +430,22 @@ public class SpeedrunStore {
 				}
 			}
 		}
+		// Older versions kept full details for only the latest 100 runs but every
+		// run's time: bring the older ones back as time-only runs (no date,
+		// splits or loot), oldest first, so Run History lists every run.
+		int missing = runTotals.size() - runHistory.size();
+		if (missing > 0) {
+			List<RunRecord> older = new ArrayList<>(missing);
+			for (int i = 0; i < missing; i++) {
+				older.add(timeOnly(runTotals.get(i)));
+			}
+			runHistory.addAll(0, older);
+			NucleusMod.LOGGER.info("Restored {} older runs (time only) into Run History", missing);
+			if (!migrate) {
+				runsDirtyAt = 1L;
+				flushRuns(true);
+			}
+		}
 		if (migrate) {
 			NucleusMod.LOGGER.info("Moved {} runs into runs.json", runHistory.size());
 			runsDirtyAt = 1L;
@@ -623,9 +650,9 @@ public class SpeedrunStore {
 			segmentHistory.computeIfAbsent(ids.get(i), k -> new ArrayList<>()).add(t);
 		}
 		runTotals.add(totalMs);
-		if (record != null && record.totalMs >= 0) {
-			runHistory.add(record);
-		}
+		// Every total gets a run (time-only when the details are missing), so
+		// runHistory and runTotals always line up.
+		runHistory.add(record != null && record.totalMs >= 0 ? record : timeOnly(totalMs));
 		save();
 		markRunsDirty();
 		flushRuns(true);

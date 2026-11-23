@@ -276,6 +276,10 @@ public class MadoBrickScreen extends Screen {
 	}
 
 	/** Sidebar order. Indexes follow the section headers' order inside each tab builder. */
+	/** Sidebar entry that opens the Run History screen instead of a page. */
+	private static final Section RUN_HISTORY = new Section(Tab.SPEEDRUNS, 31, "Run History",
+		"Every run you've finished: times, splits, loot and profit.", net.minecraft.world.item.Items.WRITABLE_BOOK);
+
 	private static final Section[] SECTIONS = {
 		new Section(Tab.FEATURES, 0, "Mines of Divan", "Chest locator, scavenger tracker, RNGdle.",
 			net.minecraft.world.item.Items.GOLDEN_PICKAXE),
@@ -299,6 +303,7 @@ public class MadoBrickScreen extends Screen {
 			net.minecraft.world.item.Items.NOTE_BLOCK),
 		new Section(Tab.SPEEDRUNS, 0, "Speedruns", "Nucleus run timer, splits and run history.",
 			net.minecraft.world.item.Items.CLOCK),
+		RUN_HISTORY,
 		new Section(Tab.ACHIEVEMENTS, 0, "Achievements", "Every achievement and your progress.",
 			net.minecraft.world.item.Items.NETHER_STAR),
 		new Section(Tab.FEATURES, 6, "Customization", "Menu themes, gambling sound packs, seasonal effects.",
@@ -345,6 +350,13 @@ public class MadoBrickScreen extends Screen {
 	}
 
 	private void setSection(Section sec) {
+		if (sec == RUN_HISTORY) {
+			if (scrollable(currentTab)) {
+				scrollMemory.put(sectionKey(), moreScroll);
+			}
+			RunHistoryScreen.open(this);
+			return;
+		}
 		if (sec == null || (sec.tab() == currentTab && sec.index() == currentSection)) {
 			return;
 		}

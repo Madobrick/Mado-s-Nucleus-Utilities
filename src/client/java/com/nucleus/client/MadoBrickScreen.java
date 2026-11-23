@@ -140,6 +140,7 @@ public class MadoBrickScreen extends Screen {
 
 	/** The tip shown under the menu (see {@link NucleusTips}). */
 	private String tipLine;
+	private final long tipShownAt = System.currentTimeMillis();
 	private static String lastTipLine = null;
 
 	public static void open() {
@@ -1946,8 +1947,22 @@ public class MadoBrickScreen extends Screen {
 		}
 		if (NucleusMod.CONFIG.showTips && tipLine != null) {
 			int room = Math.max(40, contentX2 - contentX1 - 8);
-			String line = NucleusUi.ellipsize(this.font, "§eTip: §7" + tipLine, room);
-			gfx.centeredText(this.font, line, contentCx(), this.height - 13, 0xFFFFFFFF);
+			String line = "§eTip: §7" + tipLine;
+			int w = this.font.width(line);
+			if (w <= room) {
+				gfx.centeredText(this.font, line, contentCx(), this.height - 13, 0xFFFFFFFF);
+			} else {
+				// Too long for one line: scroll it (pause, slide to the end, pause, repeat).
+				int over = w - room;
+				long slide = over * 1000L / 30; // 30 px per second
+				long cycle = 2500 + slide + 2500;
+				long t = (System.currentTimeMillis() - tipShownAt) % cycle;
+				int off = t < 2500 ? 0 : t < 2500 + slide ? (int) ((t - 2500) * 30 / 1000) : over;
+				int x0 = contentCx() - room / 2;
+				gfx.enableScissor(x0, this.height - 15, x0 + room, this.height - 3);
+				gfx.text(this.font, line, x0 - off, this.height - 13, 0xFFFFFFFF, true);
+				gfx.disableScissor();
+			}
 		}
 		drawTips(gfx, mouseX, mouseY);
 	}

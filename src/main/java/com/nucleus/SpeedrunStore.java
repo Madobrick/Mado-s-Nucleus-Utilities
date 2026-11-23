@@ -1,7 +1,6 @@
 package com.nucleus;
 
 import java.io.IOException;
-import java.io.Reader;
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -25,6 +24,26 @@ import net.fabricmc.loader.api.FabricLoader;
  */
 public class SpeedrunStore {
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+	private static final Gson GSON_COMPACT = new GsonBuilder().create();
+
+	/**
+	 * Every finished run lives in its own file (config/nucleus/runs.json),
+	 * not in speedrun.json: that one is rewritten on every small change
+	 * (a logo click, a hint), and the full history grows without limit.
+	 * This one is written only when a run finishes or its bundle lands,
+	 * a couple of seconds after the last change.
+	 */
+	private static final Path RUNS_PATH = FabricLoader.getInstance()
+		.getConfigDir()
+		.resolve("nucleus")
+		.resolve("runs.json");
+
+	/** What runs.json holds. */
+	private static final class RunLog {
+		List<Long> runTotals;
+		Map<String, List<Long>> segmentHistory;
+		List<RunRecord> runs;
+	}
 
 	private static final Path PATH = FabricLoader.getInstance()
 		.getConfigDir()
@@ -90,8 +109,8 @@ public class SpeedrunStore {
 	public Map<String, Long> bestSplits = new HashMap<>();
 	/** Best per-split segment durations (split took X on its own). */
 	public Map<String, Long> bestSegments = new HashMap<>();
-	/** Every finished segment duration per split, oldest first (capped, for averages). */
-	public Map<String, List<Long>> segmentHistory = new HashMap<>();
+	/** Every finished segment duration per split, oldest first (all of them; kept in runs.json). */
+	public transient Map<String, List<Long>> segmentHistory = new HashMap<>();
 	/** Cumulative split times of the best-total run, split id -> time. */
 	public Map<String, Long> bestRunSplits = new HashMap<>();
 	/** Gambler item ids dropped (fragment/jaderald/claw/alloy/jade). */
@@ -108,6 +127,8 @@ public class SpeedrunStore {
 	public Map<String, Integer> funRepeats = new HashMap<>();
 	/** Hollows lobbies visited: server name -> "lobbyDay|epochMs" (bad lobby alert). */
 	public Map<String, String> lobbyVisits = new HashMap<>();
+	/** Waypoints left behind in a lobby: server name -> "lobbyDay|epochMs|waypoints" (kept a day). */
+	public Map<String, String> lobbyWaypoints = new HashMap<>();
 	/** Times the config screen's logo was clicked (logo achievement line). */
 	public long logoClicks = 0;
 	/** Menu logo explosions (Phoenix). */
@@ -143,10 +164,12 @@ public class SpeedrunStore {
 		/** Coins the run cost (Jungle Key + robot parts / apparatus) at finish (-1 = unknown). */
 		public long runCost = -1;
 	}
-	/** Finished-run history, oldest first, capped at 100. */
-	public List<RunRecord> runHistory = new ArrayList<>();
-	/** Every finished run total, oldest first (capped, for trimmed average). */
-	public List<Long> runTotals = new ArrayList<>();
+	/** Every finished run, oldest first (no cap; kept in runs.json). */
+	public transient List<RunRecord> runHistory = new ArrayList<>();
+	/** Every finished run total, oldest first (no cap; kept in runs.json). */
+	public transient List<Long> runTotals = new ArrayList<>();
+	/** When run data changed and still needs writing (0 = nothing pending). */
+	private transient long runsDirtyAt = 0L;
 	/** Finished nucleus-run count (achievement progress). */
 	public long completedRuns = 0;
 	/** Achievement id -> highest unlocked tier index (0=bronze..4=netherite). */
@@ -158,14 +181,29 @@ public class SpeedrunStore {
 
 	public void load() {
 		if (!Files.exists(PATH)) {
+			loadRuns();
 			return;
 		}
-		try (Reader reader = Files.newBufferedReader(PATH, StandardCharsets.UTF_8)) {
+		try {
+			String text = Files.readString(PATH, StandardCharsets.UTF_8);
 			Type type = new TypeToken<SpeedrunStore>() {
 			}.getType();
-			SpeedrunStore loaded = GSON.fromJson(reader, type);
+			SpeedrunStore loaded = GSON.fromJson(text, type);
 			if (loaded == null) {
 				return;
+			}
+			legacyRunData = null;
+			try {
+				// Older versions kept (capped) run data in this file: picked
+				// up once below if runs.json doesn't exist yet.
+				legacyRunData = GSON.fromJson(text, RunLog.class);
+				com.google.gson.JsonObject obj = com.google.gson.JsonParser.parseString(text).getAsJsonObject();
+				if (obj.has("runHistory") && legacyRunData != null) {
+					legacyRunData.runs = GSON.fromJson(obj.get("runHistory"),
+						new TypeToken<List<RunRecord>>() {
+						}.getType());
+				}
+			} catch (Exception ignored) {
 			}
 			if (loaded.order != null && !loaded.order.isEmpty()) {
 				// Keep known ids in saved order; insert ids that are new
@@ -207,22 +245,7 @@ public class SpeedrunStore {
 			if (loaded.bestSegments != null) {
 				bestSegments = new HashMap<>(loaded.bestSegments);
 			}
-			if (loaded.segmentHistory != null) {
-				segmentHistory = new HashMap<>();
-				for (Map.Entry<String, List<Long>> e : loaded.segmentHistory.entrySet()) {
-					if (e.getKey() != null && e.getValue() != null) {
-						List<Long> clean = new ArrayList<>();
-						for (Long t : e.getValue()) {
-							if (t != null && t >= 500L) {
-								clean.add(t);
-							}
-						}
-						if (!clean.isEmpty()) {
-							segmentHistory.put(e.getKey(), clean);
-						}
-					}
-				}
-			}
+			loadRuns();
 			// One-time repair: drop bogus sub-half-second bests, backfill
 			// from surviving history where possible.
 			for (String id : new ArrayList<>(bestSegments.keySet())) {
@@ -270,6 +293,9 @@ public class SpeedrunStore {
 			if (loaded.lobbyVisits != null) {
 				lobbyVisits = new HashMap<>(loaded.lobbyVisits);
 			}
+			if (loaded.lobbyWaypoints != null) {
+				lobbyWaypoints = new HashMap<>(loaded.lobbyWaypoints);
+			}
 			if (loaded.bundleStreaks != null) {
 				bundleStreaks = new HashMap<>(loaded.bundleStreaks);
 			}
@@ -309,32 +335,6 @@ public class SpeedrunStore {
 		if (touched) {
 			save();
 		}
-			if (loaded.runTotals != null) {
-				runTotals = new ArrayList<>(loaded.runTotals);
-			}
-			if (loaded.runHistory != null) {
-				runHistory = new ArrayList<>();
-				for (RunRecord r : loaded.runHistory) {
-					if (r != null && r.totalMs >= 0) {
-						if (r.ids == null) {
-							r.ids = new ArrayList<>();
-						}
-						if (r.splits == null) {
-							r.splits = new ArrayList<>();
-						}
-						if (r.segments == null) {
-							r.segments = new ArrayList<>();
-						}
-						if (r.loot == null) {
-							r.loot = new ArrayList<>();
-						}
-						runHistory.add(r);
-					}
-				}
-				while (runHistory.size() > 100) {
-					runHistory.remove(0);
-				}
-			}
 			completedRuns = Math.max(0, loaded.completedRuns);
 			if (loaded.unlockedTiers != null) {
 				unlockedTiers = new HashMap<>(loaded.unlockedTiers);
@@ -344,8 +344,122 @@ public class SpeedrunStore {
 			if (loaded.speedTimerScale >= 0.5f && loaded.speedTimerScale <= 3.0f) {
 				speedTimerScale = loaded.speedTimerScale;
 			}
-		} catch (IOException e) {
+		} catch (Exception e) {
 			NucleusMod.LOGGER.warn("Failed to read speedrun store: {}", e.getMessage());
+		}
+	}
+
+	/** Run data found in an old speedrun.json (moved to runs.json on first load). */
+	private transient RunLog legacyRunData = null;
+
+	/** Reads runs.json, or moves the old in-file run data over the first time. */
+	private void loadRuns() {
+		RunLog log = null;
+		boolean migrate = false;
+		if (Files.exists(RUNS_PATH)) {
+			try {
+				log = GSON.fromJson(Files.readString(RUNS_PATH, StandardCharsets.UTF_8), RunLog.class);
+			} catch (Exception e) {
+				NucleusMod.LOGGER.warn("Failed to read run history: {}", e.getMessage());
+				// Keep the unreadable file for recovery and start fresh beside it.
+				try {
+					Files.move(RUNS_PATH, RUNS_PATH.resolveSibling("runs.broken-" + System.currentTimeMillis() + ".json"));
+				} catch (IOException ignored) {
+				}
+			}
+		} else if (legacyRunData != null) {
+			log = legacyRunData;
+			migrate = true;
+		}
+		legacyRunData = null;
+		runHistory = new ArrayList<>();
+		runTotals = new ArrayList<>();
+		segmentHistory = new HashMap<>();
+		if (log == null) {
+			return;
+		}
+		if (log.runs != null) {
+			for (RunRecord r : log.runs) {
+				if (r != null && r.totalMs >= 0) {
+					if (r.ids == null) {
+						r.ids = new ArrayList<>();
+					}
+					if (r.splits == null) {
+						r.splits = new ArrayList<>();
+					}
+					if (r.segments == null) {
+						r.segments = new ArrayList<>();
+					}
+					if (r.loot == null) {
+						r.loot = new ArrayList<>();
+					}
+					runHistory.add(r);
+				}
+			}
+		}
+		if (log.runTotals != null) {
+			for (Long t : log.runTotals) {
+				if (t != null && t >= 0) {
+					runTotals.add(t);
+				}
+			}
+		}
+		if (log.segmentHistory != null) {
+			for (Map.Entry<String, List<Long>> e : log.segmentHistory.entrySet()) {
+				if (e.getKey() != null && e.getValue() != null) {
+					List<Long> clean = new ArrayList<>();
+					for (Long t : e.getValue()) {
+						if (t != null && t >= 500L) {
+							clean.add(t);
+						}
+					}
+					if (!clean.isEmpty()) {
+						segmentHistory.put(e.getKey(), clean);
+					}
+				}
+			}
+		}
+		if (migrate) {
+			NucleusMod.LOGGER.info("Moved {} runs into runs.json", runHistory.size());
+			runsDirtyAt = 1L;
+			flushRuns(true);
+			save();
+		}
+	}
+
+	/** Run data changed: written to runs.json shortly (see {@link #flushRuns}). */
+	public void markRunsDirty() {
+		runsDirtyAt = System.currentTimeMillis();
+	}
+
+	/**
+	 * Writes runs.json if something changed: {@code force} writes now,
+	 * otherwise only once 1.5s passed since the last change (a bundle's
+	 * loot lines arrive one by one). Written to a temp file and swapped in,
+	 * so a crash mid-write can't eat the history.
+	 */
+	public void flushRuns(boolean force) {
+		if (runsDirtyAt == 0L || (!force && System.currentTimeMillis() - runsDirtyAt < 1500L)) {
+			return;
+		}
+		runsDirtyAt = 0L;
+		RunLog log = new RunLog();
+		log.runs = runHistory;
+		log.runTotals = runTotals;
+		log.segmentHistory = segmentHistory;
+		try {
+			Files.createDirectories(RUNS_PATH.getParent());
+			Path tmp = RUNS_PATH.resolveSibling("runs.json.tmp");
+			Files.writeString(tmp, GSON_COMPACT.toJson(log), StandardCharsets.UTF_8);
+			try {
+				Files.move(tmp, RUNS_PATH, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+					java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+			} catch (IOException atomicFailed) {
+				Files.move(tmp, RUNS_PATH, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+			}
+		} catch (IOException e) {
+			NucleusMod.LOGGER.warn("Failed to save run history: {}", e.getMessage());
+			runsDirtyAt = System.currentTimeMillis();
 		}
 	}
 
@@ -423,6 +537,37 @@ public class SpeedrunStore {
 		return out;
 	}
 
+	/**
+	 * Automatic splits: rewrites the split order to the route just run.
+	 * The slots of the splits that were done are refilled in the order
+	 * they were done; splits that weren't (disabled, skipped, still open
+	 * at the 5th placement) keep their places. Returns true if it changed.
+	 */
+	public boolean adoptRouteOrder(List<String> done) {
+		List<String> route = new ArrayList<>();
+		for (String id : done) {
+			if (order.contains(id) && !route.contains(id)) {
+				route.add(id);
+			}
+		}
+		if (route.size() < 2) {
+			return false;
+		}
+		List<String> next = new ArrayList<>(order);
+		int r = 0;
+		for (int i = 0; i < next.size(); i++) {
+			if (route.contains(next.get(i))) {
+				next.set(i, route.get(r++));
+			}
+		}
+		if (next.equals(order)) {
+			return false;
+		}
+		order = next;
+		save();
+		return true;
+	}
+
 	public void moveUp(String id) {
 		int i = order.indexOf(id);
 		if (i > 0) {
@@ -445,7 +590,7 @@ public class SpeedrunStore {
 	 * Records a finished run. Returns true if it is a new best total.
 	 * Per-split bests (cumulative) and per-segment bests update independently.
 	 * Segment history feeds per-split averages; the best run's splits are
-	 * snapshotted for the history hover. Totals history is capped.
+	 * snapshotted for the history hover. Nothing is capped.
 	 */
 	public boolean submitRun(long totalMs, List<String> ids, List<Long> timesMs, List<Long> segmentMs,
 		RunRecord record) {
@@ -475,23 +620,15 @@ public class SpeedrunStore {
 			if (prev == null || t < prev) {
 				bestSegments.put(ids.get(i), t);
 			}
-			List<Long> hist = segmentHistory.computeIfAbsent(ids.get(i), k -> new ArrayList<>());
-			hist.add(t);
-			while (hist.size() > 500) {
-				hist.remove(0);
-			}
+			segmentHistory.computeIfAbsent(ids.get(i), k -> new ArrayList<>()).add(t);
 		}
 		runTotals.add(totalMs);
-		while (runTotals.size() > 5000) {
-			runTotals.remove(0);
-		}
 		if (record != null && record.totalMs >= 0) {
 			runHistory.add(record);
-			while (runHistory.size() > 100) {
-				runHistory.remove(0);
-			}
 		}
 		save();
+		markRunsDirty();
+		flushRuns(true);
 		return newBest;
 	}
 

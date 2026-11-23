@@ -151,6 +151,8 @@ public class NucleusConfig {
 	public int jackpotOddsFragment = 8;
 	public int jackpotOddsMixture = 3;
 	public int jackpotOddsFlawless = 1;
+	/** Precious Pearl wheel spin odds, 1-in-N (1 = every pearl spins). */
+	public int jackpotOddsPearl = 1;
 
 	/** Zoom level percent 0-100 for the wheel finale (0 = off). */
 	public int jackpotZoomPct = 50;
@@ -167,11 +169,20 @@ public class NucleusConfig {
 	/** When true the mod sends no chat messages at all. */
 	public boolean quietChat = false;
 
+	/** A random tip under the settings menu when it opens. */
+	public boolean showTips = true;
+
 	/** Master switch for the crystal-run speedrun timer. */
 	public boolean speedrunEnabled = true;
 
 	/** Prints a lobby run summary in chat when leaving a lobby with 2+ runs. */
 	public boolean lobbySummary = true;
+
+	/** Splits fire in any order; the split order follows the route of the last run. */
+	public boolean autoSplits = true;
+
+	/** Splits list (times + diff vs best run) under the speedrun timer. */
+	public boolean showSplitsHud = true;
 
 	/** SAFE MODE: blocks every /warp except /warp nucleus|cn. */
 	public boolean safeMode = false;
@@ -185,6 +196,8 @@ public class NucleusConfig {
 	public boolean seasonalEffects = true;
 	/** Warn on entering a Hollows lobby you were already in, or one over 2 weeks old. */
 	public boolean badLobbyAlertEnabled = true;
+	/** Waypoints come back when you rejoin a Hollows lobby you set them in. */
+	public boolean keepWaypointsOnRejoin = true;
 
 	/** Auto safe mode: switches safe mode on after N runs in one lobby. */
 	public boolean autoSafeMode = false;
@@ -269,6 +282,7 @@ public class NucleusConfig {
 		jackpotOddsFragment = range(jackpotOddsFragment, 1, 1_000_000, d.jackpotOddsFragment);
 		jackpotOddsMixture = range(jackpotOddsMixture, 1, 1_000_000, d.jackpotOddsMixture);
 		jackpotOddsFlawless = range(jackpotOddsFlawless, 1, 1_000_000, d.jackpotOddsFlawless);
+		jackpotOddsPearl = range(jackpotOddsPearl, 1, 1_000_000, d.jackpotOddsPearl);
 		jackpotZoomPct = range(jackpotZoomPct, 0, 100, d.jackpotZoomPct);
 		timerBg = range(timerBg, 0, 100, d.timerBg);
 		autoSafeModeRuns = range(autoSafeModeRuns, 1, 20, d.autoSafeModeRuns);

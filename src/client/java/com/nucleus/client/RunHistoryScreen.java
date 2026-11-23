@@ -141,7 +141,7 @@ public class RunHistoryScreen extends Screen {
 	}
 
 	private int viewTop() {
-		return selected >= 0 ? 104 : 108;
+		return selected >= 0 ? 104 : 116;
 	}
 
 	private int viewBottom() {
@@ -202,7 +202,7 @@ public class RunHistoryScreen extends Screen {
 					selected = -1;
 					scroll = 0;
 					rebuildWidgets();
-				}).pos(bx, 82).size(bw, 20).accent(m.accent).icon(new ItemStack(m.icon)).build();
+				}).pos(bx, 90).size(bw, 20).accent(m.accent).icon(new ItemStack(m.icon)).build();
 				b.selected(m == mode);
 				addRenderableWidget(b);
 				bx += bw + 4;
@@ -444,7 +444,7 @@ public class RunHistoryScreen extends Screen {
 		if (n > 0 && n < runCount) {
 			count += " §8• profit from the " + String.format(Locale.ROOT, "%,d", n) + " whose bundle was seen";
 		}
-		gfx.centeredText(this.font, "§8" + count, cx, 76, 0xFFFFFFFF);
+		gfx.centeredText(this.font, "§8" + count, cx, 78, 0xFFFFFFFF);
 	}
 
 	private void drawRow(GuiGraphicsExtractor gfx, SpeedrunStore.RunRecord r, int i, int x1, int y, int x2,

@@ -96,7 +96,22 @@ public class MoveHudScreen extends Screen {
 				NucleusMod.CONFIG.balTimerY = e.y;
 				NucleusMod.CONFIG.balTimerScale = e.scale;
 			}));
-		entries.add(new Entry("Speedrun timer", speedrunLines(), speedrunColors(), HudText.ones(2),
+		String[] srLines = speedrunLines();
+		int[] srColors = speedrunColors();
+		if (NucleusMod.CONFIG.showSplitsHud) {
+			// Splits list preview (same rows the HUD draws, as plain lines).
+			List<SpeedrunHud.Row> rows = SpeedrunHud.splitRows();
+			String[] l2 = java.util.Arrays.copyOf(srLines, srLines.length + rows.size());
+			int[] c2 = java.util.Arrays.copyOf(srColors, srColors.length + rows.size());
+			for (int i = 0; i < rows.size(); i++) {
+				SpeedrunHud.Row r = rows.get(i);
+				l2[srLines.length + i] = "  " + r.name() + "   " + r.time() + (r.diff().isEmpty() ? "" : "  " + r.diff());
+				c2[srLines.length + i] = r.nameColor();
+			}
+			srLines = l2;
+			srColors = c2;
+		}
+		entries.add(new Entry("Speedrun timer", srLines, srColors, HudText.ones(srLines.length),
 			NucleusMod.SPEEDRUN.speedTimerX, NucleusMod.SPEEDRUN.speedTimerY,
 			clampScale(NucleusMod.SPEEDRUN.speedTimerScale),
 			e -> {

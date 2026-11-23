@@ -40,6 +40,12 @@ import com.nucleus.SpeedrunStore;
  * PLACED (x/5) title counter; the 5th one ends the run.</li>
  * </ul>
  *
+ * <p>Automatic splits (Speedruns tab, on by default): any open split can
+ * fire, in whatever order you actually do them; the run's split list
+ * follows that order, and the saved order is rewritten to it at the end of
+ * the run, so the next run expects the same route. Off: only the current
+ * split can fire, in the fixed order.
+ *
  * <p>Caveat: if Hypixel grants a crystal with no chat line at all, that
  * split stalls — use "Skip split" in the Speedruns tab.
  */
@@ -68,6 +74,10 @@ public final class SpeedrunManager {
 	private static final List<Long> splitTimes = new ArrayList<>();
 	private static final List<Long> segmentTimes = new ArrayList<>();
 	private static int splitIdx = 0;
+	/** The best run's split times when this run started (what the splits HUD compares against). */
+	private static java.util.Map<String, Long> compareSplits = new java.util.HashMap<>();
+	/** Splits really completed this run (not skipped / closed by the 5th placement), in order. */
+	private static final List<String> doneOrder = new ArrayList<>();
 	private static long finishedTotalMs = -1;
 	private static boolean wasInBox = false;
 	private static int tickCounter = 0;
@@ -103,7 +113,7 @@ public final class SpeedrunManager {
 				&& System.currentTimeMillis() - lastFinishedAt < GAP_LOOT_MS) {
 				lastFinished.loot.clear();
 				lastFinished.lootValue = 0L;
-				NucleusMod.SPEEDRUN.save();
+				NucleusMod.SPEEDRUN.markRunsDirty();
 			}
 		} catch (Exception ignored) {
 		}
@@ -144,7 +154,7 @@ public final class SpeedrunManager {
 				&& lastFinished.loot.size() < MAX_LOOT_LINES) {
 				lastFinished.loot.add(entry);
 				lastFinished.lootValue = DropPrices.bundleValue(lastFinished.loot);
-				NucleusMod.SPEEDRUN.save();
+				NucleusMod.SPEEDRUN.markRunsDirty();
 			}
 		} catch (Exception ignored) {
 		}
@@ -188,6 +198,16 @@ public final class SpeedrunManager {
 		return splitIdx;
 	}
 
+	/** Cumulative times of the splits done so far this run (same order as {@link #runOrder()}). */
+	public static List<Long> splitTimes() {
+		return new ArrayList<>(splitTimes);
+	}
+
+	/** Best-run split times as they were when this run started. */
+	public static java.util.Map<String, Long> compareSplits() {
+		return new java.util.HashMap<>(compareSplits);
+	}
+
 	public static String currentHead() {
 		if (state != State.RUNNING || splitIdx >= runOrder.size()) {
 			return null;
@@ -203,6 +223,7 @@ public final class SpeedrunManager {
 		runOrder = new ArrayList<>();
 		splitTimes.clear();
 		segmentTimes.clear();
+		doneOrder.clear();
 		splitIdx = 0;
 		finishedTotalMs = -1;
 		wasInBox = false;
@@ -261,6 +282,7 @@ public final class SpeedrunManager {
 		runOrder = new ArrayList<>();
 		splitTimes.clear();
 		segmentTimes.clear();
+		doneOrder.clear();
 		splitIdx = 0;
 		finishedTotalMs = -1;
 		placeCount = 0;
@@ -273,7 +295,8 @@ public final class SpeedrunManager {
 	public static void printHistory() {
 		Minecraft client = Minecraft.getInstance();
 		int runs = NucleusMod.SPEEDRUN.runTotals.size();
-		MadoChat.chat(client, Component.literal("§b[MNU] §6§lRun history §7(§e" + runs + " §7runs)"));
+		MadoChat.chat(client, Component.literal("§b[MNU] §6§lRun stats §7(§e"
+			+ String.format(java.util.Locale.ROOT, "%,d", runs) + " §7runs all-time)"));
 		Component bestLine = Component.literal(
 			"§7Best total: §e" + SpeedrunStore.fmt(NucleusMod.SPEEDRUN.bestTotalMs));
 		if (!NucleusMod.SPEEDRUN.bestRunSplits.isEmpty()) {
@@ -295,6 +318,35 @@ public final class SpeedrunManager {
 		MadoChat.chat(client, bestLine);
 		MadoChat.chat(client, Component.literal(
 			"§7Average (trimmed): §e" + SpeedrunStore.fmt(NucleusMod.SPEEDRUN.trimmedAverageMs())));
+		// Recent form and today, from the full history.
+		List<Long> totals = NucleusMod.SPEEDRUN.runTotals;
+		if (totals.size() >= 2) {
+			int k = Math.min(10, totals.size());
+			long sum = 0;
+			for (int i = totals.size() - k; i < totals.size(); i++) {
+				sum += totals.get(i);
+			}
+			MadoChat.chat(client, Component.literal("§7Last " + k + " runs avg: §e" + SpeedrunStore.fmt(sum / k)));
+		}
+		long dayStart = java.time.LocalDate.now().atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+		List<SpeedrunStore.RunRecord> today = new ArrayList<>();
+		for (SpeedrunStore.RunRecord r : NucleusMod.SPEEDRUN.runHistory) {
+			if (r.finishedAt >= dayStart) {
+				today.add(r);
+			}
+		}
+		if (!today.isEmpty()) {
+			long sum = 0;
+			long fastest = Long.MAX_VALUE;
+			for (SpeedrunStore.RunRecord r : today) {
+				sum += r.totalMs;
+				fastest = Math.min(fastest, r.totalMs);
+			}
+			long[] tp = RunHistoryScreen.profitStats(today);
+			MadoChat.chat(client, Component.literal("§7Today: §e" + today.size() + " §7runs §8| §7avg §e"
+				+ SpeedrunStore.fmt(sum / today.size()) + " §8| §7fastest §e" + SpeedrunStore.fmt(fastest)
+				+ (tp[3] > 0 ? " §8| §7profit " + (tp[2] < 0 ? "§c" : "§a") + RunHistoryScreen.coins(tp[2], true) : "")));
+		}
 		long[] profit = RunHistoryScreen.profitStats(NucleusMod.SPEEDRUN.runHistory);
 		if (profit[3] > 0) {
 			MadoChat.chat(client, Component.literal("§7Avg profit/run: " + (profit[0] < 0 ? "§c" : "§a")
@@ -422,25 +474,42 @@ public final class SpeedrunManager {
 			finishFromPlace(client);
 			return;
 		}
-		String head = runOrder.get(splitIdx);
-		boolean hit = switch (head) {
+		if (norm.contains("you placed the") && norm.contains("crystal") && runOrder.contains("place")
+			&& (splitIdx == runOrder.size() - 1 || NucleusMod.CONFIG.autoSplits)) {
+			MadoChat.chat(client, Component.literal("§b[MNU] §7Crystals placed: §e"
+				+ Math.min(placeCount, 5) + "§7/§e5"));
+		}
+		if (NucleusMod.CONFIG.autoSplits) {
+			// Any open split may fire; it moves up to the current slot so the
+			// recorded splits stay in the order they really happened.
+			for (int k = splitIdx; k < runOrder.size(); k++) {
+				String id = runOrder.get(k);
+				if (splitHit(id, norm)) {
+					if (k != splitIdx) {
+						runOrder.remove(k);
+						runOrder.add(splitIdx, id);
+					}
+					completeHead(client, false);
+					return;
+				}
+			}
+			return;
+		}
+		if (splitHit(runOrder.get(splitIdx), norm)) {
+			completeHead(client, false);
+		}
+	}
+
+	/** Does this server line complete split {@code id}? ("place" ends via the placement counter.) */
+	private static boolean splitHit(String id, String norm) {
+		return switch (id) {
 			case "yolkar" -> ChatLines.isNpc(norm) && norm.contains("yolkar")
 				&& (norm.contains("well done") || norm.contains("covering you in my foul stench"));
 			case "tool" -> norm.contains("you have returned the scavenged");
 			case "amber", "sapphire", "jade", "amethyst", "topaz" ->
-				!norm.contains("[npc]") && norm.contains(head + " crystal");
-			case "place" -> {
-				if (norm.contains("you placed the") && norm.contains("crystal")) {
-					MadoChat.chat(client, Component.literal("§b[MNU] §7Crystals placed: §e"
-						+ Math.min(placeCount, 5) + "§7/§e5"));
-				}
-				yield false;
-			}
+				!norm.contains("[npc]") && norm.contains(id + " crystal");
 			default -> false;
 		};
-		if (hit) {
-			completeHead(client, false);
-		}
 	}
 
 	/** Which of the five crystals a placement line names (null if none). */
@@ -455,8 +524,10 @@ public final class SpeedrunManager {
 
 	private static void startRun(Minecraft client) {
 		runOrder = NucleusMod.SPEEDRUN.runSnapshot();
+		compareSplits = new java.util.HashMap<>(NucleusMod.SPEEDRUN.bestRunSplits);
 		splitTimes.clear();
 		segmentTimes.clear();
+		doneOrder.clear();
 		splitIdx = 0;
 		placeCount = 0;
 		placedCrystals.clear();
@@ -473,6 +544,9 @@ public final class SpeedrunManager {
 
 	private static void completeHead(Minecraft client, boolean skipped) {
 		String id = runOrder.get(splitIdx);
+		if (!skipped) {
+			doneOrder.add(id);
+		}
 		long elapsed = elapsedMs();
 		splitTimes.add(elapsed);
 		recordSegment(elapsed);
@@ -531,6 +605,10 @@ public final class SpeedrunManager {
 		boolean newBest = NucleusMod.SPEEDRUN.submitRun(total, new ArrayList<>(runOrder), new ArrayList<>(splitTimes), new ArrayList<>(segmentTimes), record);
 		lastFinished = record;
 		lastFinishedAt = System.currentTimeMillis();
+		if (NucleusMod.CONFIG.autoSplits && NucleusMod.SPEEDRUN.adoptRouteOrder(doneOrder)) {
+			MadoChat.chat(client, Component.literal(
+				"§b[MNU] §7Split order updated to this run's route for next time."));
+		}
 		Achievements.onRunFinished(total);
 		NucleusMod.LOGGER.info("Speedrun finished: {} (best {})", SpeedrunStore.fmt(total), SpeedrunStore.fmt(NucleusMod.SPEEDRUN.bestTotalMs));
 		MadoChat.chat(client, Component.literal(

@@ -26,8 +26,10 @@ public final class MadoBrickCommands {
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
 			dispatcher.register(ClientCommands.literal("mado")
 				.executes(MadoBrickCommands::openGui)
+				.then(ClientCommands.literal("help").executes(MadoBrickCommands::help))
 				.then(ClientCommands.literal("times").executes(MadoBrickCommands::history))
-				.then(ClientCommands.literal("runs").executes(MadoBrickCommands::history))
+				.then(ClientCommands.literal("stats").executes(MadoBrickCommands::history))
+				.then(ClientCommands.literal("runs").executes(MadoBrickCommands::runsScreen))
 				.then(ClientCommands.literal("stop").executes(MadoBrickCommands::stop))
 				.then(ClientCommands.literal("lobbyStats").executes(MadoBrickCommands::lobbyStats))
 				.then(ClientCommands.literal("safe").executes(MadoBrickCommands::safe))
@@ -69,6 +71,30 @@ public final class MadoBrickCommands {
 
 	private static int history(CommandContext<FabricClientCommandSource> ctx) {
 		SpeedrunManager.printHistory();
+		return 1;
+	}
+
+	/** /mado runs: the Run History screen (every run, sortable). */
+	private static int runsScreen(CommandContext<FabricClientCommandSource> ctx) {
+		RunHistoryScreen.open(null);
+		return 1;
+	}
+
+	private static int help(CommandContext<FabricClientCommandSource> ctx) {
+		String[] lines = {
+			"§b[MNU] §6§lCommands",
+			"§e/mado §7- open the settings",
+			"§e/mado runs §7- Run History (every run, sortable)",
+			"§e/mado stats §7(or §e/mado times§7) - all-time, recent and today's run stats in chat",
+			"§e/mado lobbyStats §7- runs in this lobby so far",
+			"§e/mado stop §7- cancel the current run",
+			"§e/mado safe §7- toggle safe mode",
+			"§e/mado syncRuns §7- take your run count from the Nucleus menu",
+			"§e/madodebug §7- what the mod sees right now (for bug reports)",
+		};
+		for (String l : lines) {
+			MadoChat.feedback(ctx.getSource(), Component.literal(l));
+		}
 		return 1;
 	}
 

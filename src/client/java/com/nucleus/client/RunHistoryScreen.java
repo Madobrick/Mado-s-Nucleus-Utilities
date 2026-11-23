@@ -15,7 +15,8 @@ import com.nucleus.NucleusMod;
 import com.nucleus.SpeedrunStore;
 
 /**
- * Run History: recent / fastest / most profitable finished runs, each with
+ * Run History: every finished run (no cap), as recent / fastest / most
+ * profitable, each with
  * its profit (bundle value minus the run's costs, SkyHanni's model), plus
  * the average profit per run up top. Click a run for its splits and every
  * loot line with its price. Cancelled runs never record.
@@ -38,15 +39,22 @@ public class RunHistoryScreen extends Screen {
 	}
 
 	private static final int ROW_H = 24;
-	private static final int LIST_SIZE = 25;
+	/** Scroll bar width (right edge of the list). */
+	private static final int BAR_W = 5;
 	private static final int GREEN = 0x62E06A;
 	private static final int RED = 0xFF5A5A;
 
 	private final Screen parent;
 	private static Mode mode = Mode.RECENT;
 	private List<SpeedrunStore.RunRecord> view = new ArrayList<>();
+	/** Run number (1 = first ever) of each row in {@link #view}. */
+	private List<Integer> viewNumbers = new ArrayList<>();
 	private int selected = -1;
 	private double scroll = 0;
+	/** {average, best, total, count} for the stat tiles, worked out once per open (not every frame). */
+	private long[] stats = new long[4];
+	private int runCount = 0;
+	private boolean draggingBar = false;
 
 	public RunHistoryScreen(Screen parent) {
 		super(Component.literal("Run History"));
@@ -143,9 +151,16 @@ public class RunHistoryScreen extends Screen {
 	@Override
 	protected void init() {
 		List<SpeedrunStore.RunRecord> all = NucleusMod.SPEEDRUN.runHistory;
+		runCount = all.size();
+		stats = profitStats(all);
+		// Every run, numbered by when it happened (#1 = first ever).
+		java.util.IdentityHashMap<SpeedrunStore.RunRecord, Integer> number = new java.util.IdentityHashMap<>();
+		for (int i = 0; i < all.size(); i++) {
+			number.put(all.get(i), i + 1);
+		}
 		view = new ArrayList<>();
 		if (mode == Mode.RECENT) {
-			for (int i = all.size() - 1; i >= 0 && view.size() < LIST_SIZE; i--) {
+			for (int i = all.size() - 1; i >= 0; i--) {
 				view.add(all.get(i));
 			}
 		} else {
@@ -153,12 +168,25 @@ public class RunHistoryScreen extends Screen {
 			if (mode == Mode.FASTEST) {
 				sorted.sort((a, b) -> Long.compare(a.totalMs, b.totalMs));
 			} else {
-				sorted.removeIf(r -> profit(r) == null);
-				sorted.sort((a, b) -> Long.compare(profit(b), profit(a)));
+				java.util.IdentityHashMap<SpeedrunStore.RunRecord, Long> profits = new java.util.IdentityHashMap<>();
+				for (SpeedrunStore.RunRecord r : sorted) {
+					Long p = profit(r);
+					if (p != null) {
+						profits.put(r, p);
+					}
+				}
+				sorted.removeIf(r -> !profits.containsKey(r));
+				sorted.sort((a, b) -> Long.compare(profits.get(b), profits.get(a)));
 			}
-			for (int i = 0; i < Math.min(LIST_SIZE, sorted.size()); i++) {
-				view.add(sorted.get(i));
-			}
+			view.addAll(sorted);
+		}
+		viewNumbers = new ArrayList<>();
+		for (SpeedrunStore.RunRecord r : view) {
+			viewNumbers.add(number.getOrDefault(r, 0));
+		}
+		double maxScroll = Math.max(0, view.size() * ROW_H - (viewBottom() - viewTop()));
+		if (selected < 0) {
+			scroll = Math.min(scroll, maxScroll);
 		}
 		if (selected >= view.size()) {
 			selected = -1;
@@ -207,17 +235,88 @@ public class RunHistoryScreen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-		double content = selected >= 0 ? detailHeight() : view.size() * ROW_H;
-		double max = Math.max(0, content - (viewBottom() - viewTop()));
+		double max = maxScroll();
 		if (max > 0 && mouseY >= viewTop() && mouseY <= viewBottom()) {
-			scroll = Math.min(max, Math.max(0, scroll - scrollY * 16));
+			// Three rows a notch on the list (it can hold thousands of runs).
+			double step = selected >= 0 ? 16 : ROW_H * 3;
+			scroll = Math.min(max, Math.max(0, scroll - scrollY * step));
 			return true;
 		}
 		return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
 	}
 
+	private double maxScroll() {
+		double content = selected >= 0 ? detailHeight() : view.size() * ROW_H;
+		return Math.max(0, content - (viewBottom() - viewTop()));
+	}
+
+	/** Scroll bar track x (list only). */
+	private int barX() {
+		return panelX2() - 3 - BAR_W;
+	}
+
+	/** Thumb height and top for the current scroll. */
+	private int[] thumb() {
+		int track = viewBottom() - viewTop();
+		double content = Math.max(1, view.size() * ROW_H);
+		int h = (int) Math.max(14, Math.min(track, track * (track / content)));
+		double max = maxScroll();
+		int top = viewTop() + (int) (max <= 0 ? 0 : (track - h) * (scroll / max));
+		return new int[] { h, top };
+	}
+
+	private void dragBarTo(double mouseY) {
+		int track = viewBottom() - viewTop();
+		int h = thumb()[0];
+		double f = (mouseY - viewTop() - h / 2.0) / Math.max(1, track - h);
+		scroll = Math.max(0, Math.min(1, f)) * maxScroll();
+	}
+
+	@Override
+	public boolean mouseDragged(net.minecraft.client.input.MouseButtonEvent event, double dx, double dy) {
+		if (draggingBar) {
+			dragBarTo(event.y());
+			return true;
+		}
+		return super.mouseDragged(event, dx, dy);
+	}
+
+	@Override
+	public boolean mouseReleased(net.minecraft.client.input.MouseButtonEvent event) {
+		draggingBar = false;
+		return super.mouseReleased(event);
+	}
+
+	@Override
+	public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
+		if (selected < 0 && maxScroll() > 0) {
+			double page = viewBottom() - viewTop() - ROW_H;
+			// InputConstants values differ between versions (26.3 uses SDL key codes).
+			int k = event.key();
+			if (k == com.mojang.blaze3d.platform.InputConstants.KEY_HOME) {
+				scroll = 0;
+			} else if (k == com.mojang.blaze3d.platform.InputConstants.KEY_END) {
+				scroll = maxScroll();
+			} else if (k == com.mojang.blaze3d.platform.InputConstants.KEY_PAGEUP) {
+				scroll = Math.max(0, scroll - page);
+			} else if (k == com.mojang.blaze3d.platform.InputConstants.KEY_PAGEDOWN) {
+				scroll = Math.min(maxScroll(), scroll + page);
+			} else {
+				return super.keyPressed(event);
+			}
+			return true;
+		}
+		return super.keyPressed(event);
+	}
+
 	@Override
 	public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent event, boolean doubled) {
+		if (event.button() == 0 && selected < 0 && maxScroll() > 0 && event.x() >= barX() - 2
+			&& event.x() <= barX() + BAR_W + 2 && event.y() >= viewTop() && event.y() <= viewBottom()) {
+			draggingBar = true;
+			dragBarTo(event.y());
+			return true;
+		}
 		if (event.button() == 0 && selected < 0 && event.y() >= viewTop() && event.y() <= viewBottom()
 			&& event.x() >= panelX1() && event.x() <= panelX2()) {
 			int idx = (int) ((event.y() - viewTop() + scroll) / ROW_H);
@@ -266,15 +365,16 @@ public class RunHistoryScreen extends Screen {
 			return;
 		}
 		int x1 = panelX1() + 8;
-		int x2 = panelX2() - 8;
+		boolean bar = maxScroll() > 0;
+		int x2 = panelX2() - 8 - (bar ? BAR_W + 2 : 0);
 		int y = (int) (viewTop() - scroll);
 		gfx.enableScissor(panelX1(), viewTop(), panelX2(), viewBottom());
 		try {
-			for (int i = 0; i < view.size(); i++) {
+			// Only the rows in view are drawn, so thousands of runs cost nothing.
+			int first = Math.max(0, (int) (scroll / ROW_H) - 1);
+			int last = Math.min(view.size() - 1, first + (viewBottom() - viewTop()) / ROW_H + 2);
+			for (int i = first; i <= last; i++) {
 				int ry = y + i * ROW_H;
-				if (ry + ROW_H < viewTop() || ry > viewBottom()) {
-					continue;
-				}
 				boolean hover = mouseX >= x1 && mouseX <= x2 && mouseY >= ry && mouseY < ry + ROW_H - 3
 					&& mouseY >= viewTop() && mouseY <= viewBottom();
 				drawRow(gfx, view.get(i), i, x1, ry, x2, hover);
@@ -282,11 +382,19 @@ public class RunHistoryScreen extends Screen {
 		} finally {
 			gfx.disableScissor();
 		}
+		if (bar) {
+			int[] t = thumb();
+			int bx = barX();
+			gfx.fill(bx, viewTop(), bx + BAR_W, viewBottom(), 0x60000000);
+			boolean hot = draggingBar || (mouseX >= bx - 2 && mouseX <= bx + BAR_W + 2 && mouseY >= viewTop()
+				&& mouseY <= viewBottom());
+			gfx.fill(bx, t[1], bx + BAR_W, t[1] + t[0], 0xFF000000 | (hot ? 0xFFFFFF : mode.accent));
+		}
 	}
 
 	/** Stat tiles: average profit per run, coins per hour, best, total, average time. */
 	private void drawStats(GuiGraphicsExtractor gfx, int cx) {
-		long[] st = profitStats(NucleusMod.SPEEDRUN.runHistory);
+		long[] st = stats;
 		int n = (int) st[3];
 		long avgMs = NucleusMod.SPEEDRUN.trimmedAverageMs();
 		Long perHour = n == 0 ? null : coinsPerHour(st[0], avgMs);
@@ -329,9 +437,11 @@ public class RunHistoryScreen extends Screen {
 				pose.popMatrix();
 			}
 		}
-		if (n > 0 && n < NucleusMod.SPEEDRUN.runHistory.size()) {
-			gfx.centeredText(this.font, "§8profit from the " + n + " runs whose bundle was seen", cx, 76, 0xFFFFFFFF);
+		String count = String.format(Locale.ROOT, "%,d", runCount) + " run" + (runCount == 1 ? "" : "s") + " recorded";
+		if (n > 0 && n < runCount) {
+			count += " §8• profit from the " + String.format(Locale.ROOT, "%,d", n) + " whose bundle was seen";
 		}
+		gfx.centeredText(this.font, "§8" + count, cx, 76, 0xFFFFFFFF);
 	}
 
 	private void drawRow(GuiGraphicsExtractor gfx, SpeedrunStore.RunRecord r, int i, int x1, int y, int x2,
@@ -345,10 +455,14 @@ public class RunHistoryScreen extends Screen {
 			gfx.fill(x1, y, x2, y + 1, 0x80000000 | accent);
 		}
 		int ty = y + (ROW_H - 3 - 8) / 2;
-		gfx.text(this.font, "#" + (i + 1), x1 + 6, ty, 0xFF8888AA, false);
-		gfx.text(this.font, SpeedrunStore.fmt(r.totalMs), x1 + 30, ty, 0xFFFFFFFF, true);
+		// Recent: the run's number (#1 = first ever); sorted lists: the rank.
+		int num = mode == Mode.RECENT && i < viewNumbers.size() ? viewNumbers.get(i) : i + 1;
+		String tag = "#" + num;
+		gfx.text(this.font, tag, x1 + 6, ty, 0xFF8888AA, false);
+		int tx = Math.max(x1 + 34, x1 + 10 + this.font.width(tag));
+		gfx.text(this.font, SpeedrunStore.fmt(r.totalMs), tx, ty, 0xFFFFFFFF, true);
 		String when = r.finishedAt > 0 ? ago(r.finishedAt) : "";
-		gfx.text(this.font, "§8" + when, x1 + 82, ty, 0xFFFFFFFF, false);
+		gfx.text(this.font, "§8" + when, tx + 52, ty, 0xFFFFFFFF, false);
 		String right = p == null ? "§8no loot seen" : coins(p, true);
 		int rw = this.font.width(right);
 		gfx.text(this.font, right, x2 - 6 - rw, ty, 0xFF000000 | accent, true);

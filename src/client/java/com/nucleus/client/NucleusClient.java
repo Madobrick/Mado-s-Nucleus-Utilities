@@ -80,6 +80,12 @@ public class NucleusClient implements ClientModInitializer {
 		});
 
 		ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
+		net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents.CLIENT_STOPPING.register(c -> {
+			try {
+				NucleusMod.SPEEDRUN.flushRuns(true);
+			} catch (Exception ignored) {
+			}
+		});
 		ClientEntityEvents.ENTITY_LOAD.register((entity, world) -> {
 			try {
 				MobHighlight.onEntityLoad(entity, world);
@@ -109,6 +115,7 @@ public class NucleusClient implements ClientModInitializer {
 	/** Per-lobby state: wiped on both join and disconnect. */
 	private static void resetLobbyState() {
 		HollowsDetector.reset();
+		BadLobbyAlert.onLeaveLobby();
 		LobbyDay.reset();
 		MadoBrickWaypoints.clear();
 		MadoBrickIslandWatcher.onLeave();
@@ -172,6 +179,7 @@ public class NucleusClient implements ClientModInitializer {
 	}
 
 	private void onTick(Minecraft client) {
+		NucleusMod.SPEEDRUN.flushRuns(false);
 		SkyBlockDetector.tick(client);
 		HollowsDetector.tick(client);
 		LobbyDay.tick(client);

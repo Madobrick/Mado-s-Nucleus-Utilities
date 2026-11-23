@@ -71,6 +71,7 @@ public class MadoBrickScreen extends Screen {
 	private EditBox oddsFragmentBox;
 	private EditBox oddsMixtureBox;
 	private EditBox oddsFlawlessBox;
+	private EditBox oddsPearlBox;
 	private Button divanChestColorButton;
 	private EditBox soundIdBox;
 	private EditBox customPathBox;
@@ -126,7 +127,20 @@ public class MadoBrickScreen extends Screen {
 		this.currentSection = this.currentTab == lastTab ? lastSection : 0;
 		NucleusUi.onTitleScreenOpened();
 		Achievements.onMenuOpened();
+		// A new tip each time the menu is opened (not when moving between its own screens).
+		var prev = Minecraft.getInstance().gui.screen();
+		if (prev instanceof MadoBrickScreen || prev instanceof RunHistoryScreen || prev instanceof MoveHudScreen
+			|| prev instanceof ConfirmResetScreen) {
+			tipLine = lastTipLine;
+		} else {
+			tipLine = NucleusTips.next();
+			lastTipLine = tipLine;
+		}
 	}
+
+	/** The tip shown under the menu (see {@link NucleusTips}). */
+	private String tipLine;
+	private static String lastTipLine = null;
 
 	public static void open() {
 		open(Tab.FEATURES);
@@ -553,6 +567,7 @@ public class MadoBrickScreen extends Screen {
 		oddsFragmentBox = null;
 		oddsMixtureBox = null;
 		oddsFlawlessBox = null;
+		oddsPearlBox = null;
 		soundIdBox = null;
 		customPathBox = null;
 		catBalY = -1;
@@ -736,6 +751,26 @@ public class MadoBrickScreen extends Screen {
 		addRenderableWidget(lobbySummaryBox);
 		y += rowH;
 
+		NucleusUi.NToggle autoSplitsBox = NucleusUi.NToggle.builder(Component.literal("Automatic splits"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.autoSplits)
+			.onValueChange((box, val) -> {
+				NucleusMod.CONFIG.autoSplits = val;
+				NucleusMod.CONFIG.save();
+			}).build();
+		tip(autoSplitsBox, "Splits count in whatever order you do them, and\nthe list below is re-sorted to your last run's\nroute after every run. Off: splits only count in\nthe exact order below.");
+		addRenderableWidget(autoSplitsBox);
+		y += rowH;
+
+		NucleusUi.NToggle splitsHudBox = NucleusUi.NToggle.builder(Component.literal("Show splits on screen"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.showSplitsHud)
+			.onValueChange((box, val) -> {
+				NucleusMod.CONFIG.showSplitsHud = val;
+				NucleusMod.CONFIG.save();
+			}).build();
+		tip(splitsHudBox, "Lists every split under the run timer: its time\nand +/- against your best run (green = ahead).\nMoves with the timer (Move GUI elements).");
+		addRenderableWidget(splitsHudBox);
+		y += rowH;
+
 		for (String id : new java.util.ArrayList<>(NucleusMod.SPEEDRUN.order)) {
 			y = addSplitRow(cx, y, id, true, true);
 		}
@@ -758,7 +793,7 @@ public class MadoBrickScreen extends Screen {
 
 		Button historyButton = NucleusUi.NButton.create(Component.literal("Run History..."), btn -> RunHistoryScreen.open(this))
 			.pos(cx - 150, y).size(145, 20).build();
-		tip(historyButton, "Recent + best runs with\nsplits and bundle loot.");
+		tip(historyButton, "Every run you've finished: fastest,\nmost profitable, splits and bundle loot.\nAlso: /mado runs");
 		addRenderableWidget(historyButton);
 		y += rowH + 4;
 
@@ -1009,6 +1044,16 @@ public class MadoBrickScreen extends Screen {
 		}).pos(cx + 5, y).size(145, 20).build();
 		tip(importButton, "Imports waypoints from your clipboard.");
 		addRenderableWidget(importButton);
+		y += rowH;
+
+		NucleusUi.NToggle keepWpBox = NucleusUi.NToggle.builder(Component.literal("Keep waypoints when rejoining"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.keepWaypointsOnRejoin)
+			.onValueChange((box, val) -> {
+				NucleusMod.CONFIG.keepWaypointsOnRejoin = val;
+				NucleusMod.CONFIG.save();
+			}).build();
+		tip(keepWpBox, "Leaving a Hollows lobby saves its waypoints. Come\nback to the same lobby within a day (same server,\nmatching day clock) and they're put back.");
+		addRenderableWidget(keepWpBox);
 		y += rowH + 4;
 
 		finishScrollable(Tab.WAYPOINTS, cx, y);
@@ -1303,6 +1348,16 @@ public class MadoBrickScreen extends Screen {
 		addRenderableWidget(quietBox);
 		y += rowH;
 
+		NucleusUi.NToggle tipsBox = NucleusUi.NToggle.builder(Component.literal("Show tips"), this.font)
+			.pos(cx - 150, y).selected(NucleusMod.CONFIG.showTips)
+			.onValueChange((box, val) -> {
+				NucleusMod.CONFIG.showTips = val;
+				NucleusMod.CONFIG.save();
+			}).build();
+		tip(tipsBox, "A random tip under this menu each time you open it.");
+		addRenderableWidget(tipsBox);
+		y += rowH;
+
 		Button resetButton = NucleusUi.NButton.create(Component.literal("Reset to defaults"), btn ->
 			ConfirmResetScreen.open(this)).pos(cx - 155, y).size(150, 20).build();
 		tip(resetButton, "Restore default settings.");
@@ -1470,6 +1525,10 @@ public class MadoBrickScreen extends Screen {
 		y += 16; // labels for the second row sit clear of the first boxes
 		oddsMixtureBox = oddsBox(cx - 150, y, NucleusMod.CONFIG.jackpotOddsMixture, "Gemstone Mixture 1-in-N odds.");
 		oddsFlawlessBox = oddsBox(cx + 5, y, NucleusMod.CONFIG.jackpotOddsFlawless, "Flawless Gemstone 1-in-N odds.");
+		y += rowH;
+		y += 16;
+		oddsPearlBox = oddsBox(cx - 150, y, NucleusMod.CONFIG.jackpotOddsPearl,
+			"Precious Pearl 1-in-N odds.\n1 = every pearl spins the wheel (the default).");
 		y += rowH;
 
 		IntSlider zoomSlider = new IntSlider(cx - 150, y, 300, "Zoom level",
@@ -1885,6 +1944,11 @@ public class MadoBrickScreen extends Screen {
 		} else if (currentTab == Tab.ACHIEVEMENTS) {
 			drawAchievementsTab(gfx, mouseX, mouseY);
 		}
+		if (NucleusMod.CONFIG.showTips && tipLine != null) {
+			int room = Math.max(40, contentX2 - contentX1 - 8);
+			String line = NucleusUi.ellipsize(this.font, "§eTip: §7" + tipLine, room);
+			gfx.centeredText(this.font, line, contentCx(), this.height - 13, 0xFFFFFFFF);
+		}
 		drawTips(gfx, mouseX, mouseY);
 	}
 
@@ -2001,6 +2065,7 @@ public class MadoBrickScreen extends Screen {
 			oddsLabel(gfx, oddsFragmentBox, "Fragment 1 in");
 			oddsLabel(gfx, oddsMixtureBox, "Mixture 1 in");
 			oddsLabel(gfx, oddsFlawlessBox, "Flawless 1 in");
+			oddsLabel(gfx, oddsPearlBox, "Precious Pearl 1 in");
 		}
 	}
 
@@ -2702,6 +2767,10 @@ public class MadoBrickScreen extends Screen {
 			if (oddsFlawlessBox != null) {
 				NucleusMod.CONFIG.jackpotOddsFlawless = parseOdds(oddsFlawlessBox.getValue(),
 					NucleusMod.CONFIG.jackpotOddsFlawless);
+			}
+			if (oddsPearlBox != null) {
+				NucleusMod.CONFIG.jackpotOddsPearl = parseOdds(oddsPearlBox.getValue(),
+					NucleusMod.CONFIG.jackpotOddsPearl);
 			}
 		} catch (NumberFormatException ignored) {
 		}

@@ -187,7 +187,8 @@ public final class JackpotDetector {
 				return;
 			}
 			DropType t = matchItem(n);
-			if (t != null) {
+			// Precious Pearls spin 1-in-N too (Gambling tab; 1 = always).
+			if (t != null && (t != DropType.PRECIOUS_PEARL || rollOdds(NucleusMod.CONFIG.jackpotOddsPearl))) {
 				JackpotAnimation.start(t);
 			}
 			// Consolation lottery on common bundle loot (once per loot

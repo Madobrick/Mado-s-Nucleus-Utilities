@@ -139,6 +139,80 @@ public final class MadoBrickWaypoints {
 		return Math.max(-30000000, Math.min(30000000, v));
 	}
 
+	/**
+	 * Every waypoint as text for saving with a lobby:
+	 * "T|x,y,z|x,y,z|x,y,z" for the temple set plus "C|x,y,z|..." for
+	 * custom ones, joined by ';'. Empty when there are none.
+	 */
+	public static synchronized String saveText() {
+		StringBuilder sb = new StringBuilder();
+		if (!WAYPOINTS.isEmpty()) {
+			sb.append('T');
+			for (Waypoint wp : WAYPOINTS) {
+				BlockPos p = wp.pos();
+				sb.append('|').append(p.getX()).append(',').append(p.getY()).append(',').append(p.getZ());
+			}
+		}
+		if (!CUSTOM_WAYPOINTS.isEmpty()) {
+			if (sb.length() > 0) {
+				sb.append(';');
+			}
+			sb.append('C');
+			for (Waypoint wp : CUSTOM_WAYPOINTS) {
+				BlockPos p = wp.pos();
+				sb.append('|').append(p.getX()).append(',').append(p.getY()).append(',').append(p.getZ());
+			}
+		}
+		return sb.toString();
+	}
+
+	/**
+	 * Puts back waypoints from {@link #saveText()}. Temple ones only if none
+	 * are set yet (automatic mode may have placed them already); custom ones
+	 * are added unless one already sits on that block. Returns how many.
+	 */
+	public static synchronized int restoreText(String text) {
+		if (text == null || text.isEmpty()) {
+			return 0;
+		}
+		int n = 0;
+		for (String part : text.split(";")) {
+			String[] bits = part.split("\\|");
+			if (bits.length < 2) {
+				continue;
+			}
+			List<BlockPos> pos = new ArrayList<>();
+			for (int i = 1; i < bits.length; i++) {
+				String[] xyz = bits[i].split(",");
+				if (xyz.length == 3) {
+					try {
+						pos.add(new BlockPos(clampCoord(Integer.parseInt(xyz[0].trim())),
+							clampCoord(Integer.parseInt(xyz[1].trim())), clampCoord(Integer.parseInt(xyz[2].trim()))));
+					} catch (NumberFormatException ignored) {
+					}
+				}
+			}
+			if (bits[0].equals("T") && WAYPOINTS.isEmpty() && pos.size() == OFFSETS.length) {
+				for (int i = 0; i < pos.size(); i++) {
+					WAYPOINTS.add(new Waypoint(LABELS[i], pos.get(i), i));
+				}
+				n += pos.size();
+			} else if (bits[0].equals("C")) {
+				for (BlockPos p : pos) {
+					boolean dup = false;
+					for (Waypoint wp : CUSTOM_WAYPOINTS) {
+						dup |= wp.pos().equals(p);
+					}
+					if (!dup) {
+						addCustom(p);
+						n++;
+					}
+				}
+			}
+		}
+		return n;
+	}
+
 	public static synchronized boolean hasCustom() {
 		return !CUSTOM_WAYPOINTS.isEmpty();
 	}

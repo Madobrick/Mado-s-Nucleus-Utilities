@@ -228,7 +228,7 @@ public class RunHistoryScreen extends Screen {
 				} else {
 					Minecraft client = Minecraft.getInstance();
 					client.gui.setScreen(parent instanceof MadoBrickScreen
-						? new MadoBrickScreen(MadoBrickScreen.Tab.SPEEDRUNS) : parent);
+						? new MadoBrickScreen() : parent);
 				}
 			}).pos(panelX2() - 108, this.height - 28).size(100, 20).accent(0xB8B8C8).build());
 	}
@@ -335,6 +335,9 @@ public class RunHistoryScreen extends Screen {
 			return 0;
 		}
 		SpeedrunStore.RunRecord r = view.get(selected);
+		if (SpeedrunStore.isTimeOnly(r)) {
+			return 0;
+		}
 		return 16 + r.ids.size() * 11 + 18 + (r.loot.isEmpty() ? 12 : r.loot.size() * 11) + 50;
 	}
 
@@ -461,9 +464,10 @@ public class RunHistoryScreen extends Screen {
 		gfx.text(this.font, tag, x1 + 6, ty, 0xFF8888AA, false);
 		int tx = Math.max(x1 + 34, x1 + 10 + this.font.width(tag));
 		gfx.text(this.font, SpeedrunStore.fmt(r.totalMs), tx, ty, 0xFFFFFFFF, true);
-		String when = r.finishedAt > 0 ? ago(r.finishedAt) : "";
+		String when = r.finishedAt > 0 ? ago(r.finishedAt) : "older run";
 		gfx.text(this.font, "§8" + when, tx + 52, ty, 0xFFFFFFFF, false);
-		String right = p == null ? "§8no loot seen" : coins(p, true);
+		boolean old = SpeedrunStore.isTimeOnly(r);
+		String right = p == null ? (old ? "§8time only" : "§8no loot seen") : coins(p, true);
 		int rw = this.font.width(right);
 		gfx.text(this.font, right, x2 - 6 - rw, ty, 0xFF000000 | accent, true);
 		if (p != null) {
@@ -490,10 +494,12 @@ public class RunHistoryScreen extends Screen {
 		Long p = profit(r);
 		long value = lootValue(r);
 		long cost = r.runCost >= 0 ? r.runCost : DropPrices.runCost();
-		gfx.centeredText(this.font, "§f" + SpeedrunStore.fmt(r.totalMs) + " §8• §7" + r.ids.size() + " splits"
+		boolean timeOnly = SpeedrunStore.isTimeOnly(r);
+		gfx.centeredText(this.font, "§f" + SpeedrunStore.fmt(r.totalMs) + " §8• §7"
+			+ (timeOnly ? "older run" : r.ids.size() + " splits")
 			+ (r.finishedAt > 0 ? " §8• §7" + ago(r.finishedAt) : ""), cx, 38, 0xFFFFFFFF);
 		// Profit banner
-		String big = p == null ? "NO LOOT SEEN" : coins(p, true) + " PROFIT";
+		String big = p == null ? (timeOnly ? "TIME ONLY" : "NO LOOT SEEN") : coins(p, true) + " PROFIT";
 		int bc = p == null ? 0xFF8888AA : p >= 0 ? 0xFF000000 | GREEN : 0xFF000000 | RED;
 		var pose = gfx.pose();
 		pose.pushMatrix();
@@ -512,6 +518,13 @@ public class RunHistoryScreen extends Screen {
 		int x1 = panelX1() + 12;
 		int x2 = panelX2() - 12;
 		int y = (int) (viewTop() - scroll);
+		if (timeOnly) {
+			gfx.centeredText(this.font, "§7This run is from before the mod kept full run details,",
+				cx, viewTop() + 12, 0xFFFFFFFF);
+			gfx.centeredText(this.font, "§7so only its time was saved (no date, splits or loot).",
+				cx, viewTop() + 24, 0xFFFFFFFF);
+			return;
+		}
 		gfx.enableScissor(panelX1(), viewTop(), panelX2(), viewBottom());
 		try {
 			NucleusUi.header(gfx, this.font, "SPLITS", cx, y, (x2 - x1) / 2, 0x5AA9FF);
